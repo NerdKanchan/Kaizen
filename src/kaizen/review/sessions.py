@@ -5,17 +5,19 @@ switch either of them client-side. Both now live here. The server issues an opaq
 slot and the blind flag against it, and derives blind mode from the workspace policy rather than from
 anything the caller sends. Changing the policy or opening a session is an audit event.
 
-This is not authentication: anyone with access to the machine can open a session under any name. It
-makes the reviewer's identity and the blind flag *server-side, explicit and audited*, which is what an
-independent-review process needs. A shared deployment still needs real sign-in (see
-`docs/security-review.md`).
+A session is only opened after the caller signs in: `UserStore` below holds the accounts, and
+`POST /api/auth/signin` is the only route that calls `SessionStore.open`. Identity is therefore a
+BD email address backed by a password, and the blind flag stays a server-side decision derived from
+the workspace policy rather than anything the caller sends.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from kaizen.storage.db import Database
 
@@ -119,3 +121,126 @@ class SessionStore:
     def active(self) -> list[ReviewSession]:
         rows = self.conn.execute("SELECT * FROM sessions WHERE ended_at = '' ORDER BY created_at").fetchall()
         return [ReviewSession(r["token"], r["reviewer"], int(r["slot"]), bool(r["blind"]), r["created_at"]) for r in rows]
+
+
+# ---- accounts -----------------------------------------------------------------------------------
+
+SCRYPT_N = 2**14  # ~100ms per hash on a laptop: slow enough to make offline cracking expensive
+SCRYPT_R = 8
+SCRYPT_P = 1
+MIN_PASSWORD = 10
+MAX_FAILED = 10
+LOCKOUT_SECONDS = 900
+
+
+def hash_password(password: str) -> str:
+    """scrypt with a per-account random salt, stored as one self-describing string.
+
+    Deliberately not a plain SHA-256: a fast hash of a human-chosen password is cracked in bulk if the
+    workspace file ever leaks. The parameters travel with the hash so they can be raised later without
+    invalidating existing accounts.
+    """
+    salt = secrets.token_bytes(16)
+    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32)
+    return f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        scheme, n, r, p, salt_hex, hash_hex = stored.split("$")
+        if scheme != "scrypt":
+            return False
+        expected = bytes.fromhex(hash_hex)
+        dk = hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=int(n), r=int(r), p=int(p), dklen=len(expected))
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(dk, expected)
+
+
+@dataclass(frozen=True)
+class User:
+    email: str
+    created_at: str
+    updated_at: str
+    locked_until: str
+
+
+class UserStore:
+    """Reviewer accounts: a BD email address and a password, in the workspace database.
+
+    There is no password-reset email, because this tool has no mail server to send one from. An account
+    is cleared by an administrator from the command line (`kaizen users reset`), after which the person
+    signs up again and chooses a new password themselves — so a reset never puts their password in
+    anyone else's hands.
+    """
+
+    def __init__(self, db: Database):
+        self.db = db
+        self.conn = db.conn
+
+    def _row(self, email: str):
+        return self.conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+
+    def exists(self, email: str) -> bool:
+        return self._row(email) is not None
+
+    def create(self, email: str, password: str) -> User:
+        if len(password or "") < MIN_PASSWORD:
+            raise ValueError(f"the password must be at least {MIN_PASSWORD} characters")
+        if self.exists(email):
+            raise KeyError(email)
+        now = _now()
+        with self.db.lock:
+            self.conn.execute(
+                "INSERT INTO users (email, password_hash, created_at, updated_at, failed_attempts, locked_until) VALUES (?,?,?,?,0,'')",
+                (email, hash_password(password), now, now),
+            )
+            self.db.audit(email, "auth.signup", "account created")
+            self.conn.commit()
+        return User(email, now, now, "")
+
+    def locked_seconds(self, email: str) -> int:
+        """Seconds until sign-in is allowed again, or 0. Lockouts expire on their own: nobody has to
+        unlock an account, which matters when there is no help desk behind this tool."""
+        row = self._row(email)
+        if row is None or not row["locked_until"]:
+            return 0
+        remaining = (datetime.fromisoformat(row["locked_until"]) - datetime.now(timezone.utc)).total_seconds()
+        return max(0, int(remaining))
+
+    def verify(self, email: str, password: str) -> bool:
+        """True for the right password on an unlocked account. Wrong guesses count towards a lockout."""
+        row = self._row(email)
+        if row is None or self.locked_seconds(email) > 0:
+            return False
+        if verify_password(password or "", row["password_hash"]):
+            if row["failed_attempts"] or row["locked_until"]:
+                with self.db.lock:
+                    self.conn.execute("UPDATE users SET failed_attempts = 0, locked_until = '' WHERE email = ?", (email,))
+                    self.conn.commit()
+            return True
+        failed = int(row["failed_attempts"]) + 1
+        locked = (datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_SECONDS)).isoformat(timespec="seconds") if failed >= MAX_FAILED else ""
+        with self.db.lock:
+            self.conn.execute("UPDATE users SET failed_attempts = ?, locked_until = ? WHERE email = ?", (failed, locked, email))
+            if locked:
+                self.db.audit(email, "auth.locked", f"{failed} failed sign-ins; locked for {LOCKOUT_SECONDS // 60} minutes")
+            self.conn.commit()
+        return False
+
+    def delete(self, email: str, by: str = "admin") -> bool:
+        """Clear the account so the address can sign up again. Decisions keep their reviewer name: they
+        are recorded against the address, not against a row in this table."""
+        if not self.exists(email):
+            return False
+        with self.db.lock:
+            self.conn.execute("DELETE FROM users WHERE email = ?", (email,))
+            self.db.audit(by, "auth.reset", f"account cleared for {email}; they can sign up again")
+            self.conn.commit()
+        return True
+
+    def list(self) -> list[User]:
+        rows = self.conn.execute("SELECT * FROM users ORDER BY email").fetchall()
+        return [User(r["email"], r["created_at"], r["updated_at"], r["locked_until"]) for r in rows]
+
+
