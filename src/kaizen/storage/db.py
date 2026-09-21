@@ -106,6 +106,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen_at TEXT NOT NULL,
     ended_at TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS users (
+    email TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

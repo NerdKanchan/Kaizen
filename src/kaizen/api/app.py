@@ -1,5 +1,6 @@
 """FastAPI application: the reviewer UI's backend. Local only; no external calls."""
 
+import os
 import re
 import uuid
 from dataclasses import asdict
@@ -23,14 +24,36 @@ from kaizen.review.action_items import ActionItemStore
 from kaizen.review.business import BusinessAssumptions, business_case
 from kaizen.review.mining import approve_suggestion, mine_suggestions, reject_suggestion, terminology_worklist
 from kaizen.review.rundiff import diff_runs
-from kaizen.review.sessions import POLICY_REQUIRED, ReviewSession, SessionStore
+from kaizen.review.sessions import POLICY_REQUIRED, ReviewSession, SessionStore, UserStore
 from kaizen.review.store import ReviewStore
 from kaizen.terminology.exchange import export_xlsx, import_csv, import_xlsx
 from kaizen.workspace import Workspace
 
 SESSION_COOKIE = "kaizen_session"
-SIGN_IN_HINT = "Sign in first: POST /api/sessions with your reviewer name and slot."
+SIGN_IN_HINT = "Sign in first: POST /api/auth/signin with your BD email, password and slot."
 BLIND_REFUSAL = "Not available while you are reviewing blind: it would reveal reviewer 1's decisions. End your blind session or ask reviewer 1."
+
+# ---- sign-in -----------------------------------------------------------------------------------
+ALLOWED_EMAIL_DOMAINS = {"bd.com"}
+BAD_DOMAIN = "Only BD email addresses can sign in."
+BAD_CREDENTIALS = "That email address and password do not match an account."
+
+
+def _allowed_domains() -> set[str]:
+    """Read at call time so a deployment can set KAIZEN_ALLOWED_DOMAINS without rebuilding the app."""
+    raw = os.environ.get("KAIZEN_ALLOWED_DOMAINS") or ",".join(sorted(ALLOWED_EMAIL_DOMAINS))
+    return {d.strip().lower() for d in raw.split(",") if d.strip()}
+
+
+def _bd_email(raw: str) -> str:
+    """The address, normalised, or a 400. The domain must match a whole allowed domain: splitting on the
+    last `@` and comparing for equality is what stops `someone@bd.com.evil.io` from passing as BD."""
+    email = (raw or "").strip().lower()
+    local, sep, domain = email.rpartition("@")
+    if not sep or not local or domain not in _allowed_domains():
+        raise HTTPException(400, BAD_DOMAIN)
+    return email
+
 
 SEVERITY_RANK = {"BLOCKER": 0, "MAJOR": 1, "MINOR": 2, "INFO": 3, None: 4}
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -112,6 +135,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None) -
     review = ReviewStore(ws.db)
     items = ActionItemStore(ws.db)
     sessions = SessionStore(ws.db)
+    users = UserStore(ws.db)
 
     # ---- reviewer sessions --------------------------------------------------------------------
     # Identity, slot and blind mode are server-side. The token lives in an HttpOnly cookie so page
@@ -146,16 +170,49 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None) -
         cache.put(run)
         return _summary(run, review)
 
-    # ---- runs ---------------------------------------------------------------------------------
-    @app.post("/api/sessions")
-    def open_session(response: FastResponse, payload: dict = Body(...)):
-        """Start a review session. The server decides blind mode from the workspace policy."""
+    # ---- sign-up and sign-in --------------------------------------------------------------------
+    # A session can only be opened by someone holding an account on a BD address. Only /api/auth/signin
+    # reaches SessionStore.open, so there is one door.
+
+    def _start_session(response: FastResponse, reviewer: str, payload: dict) -> dict:
         try:
-            s = sessions.open(payload.get("reviewer", ""), int(payload.get("slot", 1)), payload.get("blind"))
+            s = sessions.open(reviewer, int(payload.get("slot", 1)), payload.get("blind"))
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e))
         response.set_cookie(SESSION_COOKIE, s.token, httponly=True, samesite="lax", path="/")
         return s.to_dict(sessions.policy())
+
+    @app.post("/api/auth/signup")
+    def signup(payload: dict = Body(...)):
+        """Create an account for a BD address. Open registration: the domain is a format check, not
+        proof of employment — see docs/security-review.md."""
+        email = _bd_email(payload.get("email", ""))
+        try:
+            users.create(email, str(payload.get("password", "")))
+        except KeyError:
+            raise HTTPException(409, "An account already exists for that address. Sign in instead, or ask an administrator to reset it.")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"ok": True, "email": email}
+
+    @app.post("/api/auth/signin")
+    def signin(response: FastResponse, payload: dict = Body(...)):
+        """Exchange an email and password for a review session, which carries the slot and blind flag."""
+        email = _bd_email(payload.get("email", ""))
+        locked = users.locked_seconds(email)
+        if locked:
+            raise HTTPException(429, f"Too many failed attempts. Try again in {max(1, locked // 60)} minute(s).")
+        if not users.verify(email, str(payload.get("password", ""))):
+            # One message for "no such account" and "wrong password": the difference would tell an
+            # outsider which BD addresses have accounts here.
+            raise HTTPException(401, BAD_CREDENTIALS)
+        return _start_session(response, email, payload)
+
+    # ---- runs ---------------------------------------------------------------------------------
+    @app.post("/api/sessions")
+    def open_session():
+        """Kept only so an old cached bundle gets an explanation rather than a 404. There is no bypass."""
+        raise HTTPException(403, "Use /api/auth/signin")
 
     @app.get("/api/sessions/current")
     def current_session(session: ReviewSession | None = Depends(_open_session)):
