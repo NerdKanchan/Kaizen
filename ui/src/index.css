@@ -12,66 +12,68 @@
   /* ---- tokens: light --------------------------------------------------------------------
      RGB channels (so Tailwind can add alpha) mirrored from tailwind.config.js. */
   :root {
-    --c-canvas: 244 246 249;
+    --c-canvas: 249 244 241;
     --c-surface: 255 255 255;
-    --c-surface-2: 237 241 246;
-    --c-surface-3: 227 233 241;
-    --c-line: 220 227 236;
-    --c-line-2: 184 196 212;
-    --c-ink: 15 31 53;
-    --c-ink-2: 61 79 102;
-    --c-ink-3: 92 110 134;
+    --c-surface-2: 243 237 233;
+    --c-surface-3: 234 227 222;
+    --c-line: 230 224 220;
+    --c-line-2: 219 216 215;
+    --c-ink: 61 62 65;
+    --c-ink-2: 90 91 95;
+    --c-ink-3: 107 108 113;
     --c-ink-contrast: 255 255 255;
-    --c-rail: 18 48 95;
+    --c-rail: 3 6 32;
     --c-rail-ink: 255 255 255;
-    --c-rail-muted: 201 214 236;
-    --c-rail-dim: 157 179 218;
-    --c-brand-50: 243 246 251;
-    --c-brand-100: 232 238 248;
-    --c-brand-200: 201 214 236;
-    --c-brand-300: 157 179 218;
-    --c-brand-500: 31 90 176;
-    --c-brand-600: 25 72 144;
-    --c-brand-700: 18 48 95;
-    --c-brand-800: 13 35 71;
-    --c-brand-900: 9 26 53;
-    --c-brand-fill: 18 48 95;
+    --c-rail-muted: 185 190 230;
+    --c-rail-dim: 145 153 216;
+    --c-brand-50: 242 246 254;
+    --c-brand-100: 224 234 253;
+    --c-brand-200: 194 212 250;
+    --c-brand-300: 147 179 246;
+    --c-brand-500: 29 116 255;
+    --c-brand-600: 4 78 215;
+    --c-brand-700: 5 60 163;
+    --c-brand-800: 5 39 107;
+    --c-brand-900: 5 9 61;
+    --c-brand-fill: 5 9 61;
     --c-brand-fill-ink: 255 255 255;
-    --c-accent-50: 255 246 238;
-    --c-accent-100: 253 235 221;
-    --c-accent-200: 249 207 174;
+    --c-link: 4 77 214;
+    --c-accent-50: 255 243 234;
+    --c-accent-100: 255 228 209;
+    --c-accent-200: 255 200 163;
     --c-ok: 30 127 79;
-    --c-ok-soft: 227 244 234;
+    --c-ok-soft: 228 242 234;
     --c-ok-strong: 21 95 58;
     --c-warn: 183 121 31;
-    --c-warn-soft: 251 241 220;
+    --c-warn-soft: 250 240 220;
     --c-warn-strong: 138 90 18;
-    --c-bad: 193 58 43;
-    --c-bad-soft: 251 231 228;
-    --c-bad-strong: 143 42 31;
+    --c-bad: 206 75 53;
+    --c-bad-soft: 253 237 233;
+    --c-bad-strong: 163 58 40;
     --c-cls-exact: 30 127 79;
     --c-cls-equivalent: 14 124 134;
     --c-cls-potential: 183 121 31;
-    --c-cls-mismatch: 193 58 43;
+    --c-cls-mismatch: 206 75 53;
     --c-cls-missing: 126 58 166;
-    --c-cls-equivalent-soft: 224 243 244;
+    --c-cls-equivalent-soft: 224 241 243;
     --c-cls-equivalent-strong: 11 95 102;
-    --c-cls-missing-soft: 241 230 248;
+    --c-cls-missing-soft: 240 232 248;
     --c-cls-missing-strong: 94 42 128;
     --c-sev-blocker: 122 31 31;
     --c-sev-major: 193 58 43;
     --c-sev-minor: 183 121 31;
-    --c-sev-info: 25 72 144;
-    --shadow-pop: 0 12px 32px -12px rgba(15, 31, 53, 0.28), 0 2px 6px rgba(15, 31, 53, 0.08);
-    --shadow-lift: 0 6px 18px -8px rgba(15, 31, 53, 0.22), 0 1px 3px rgba(15, 31, 53, 0.06);
-    --scrim: rgba(9, 26, 53, 0.4);
-    --skeleton-a: #edf1f6;
-    --skeleton-b: #f6f8fb;
-    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%233d4f66'%3E%3Cpath d='M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32z'/%3E%3C/svg%3E");
+    --c-sev-info: 4 78 215;
+    --shadow-pop: 0 12px 32px -14px rgba(5, 9, 61, 0.2), 0 2px 6px rgba(5, 9, 61, 0.06);
+    --shadow-lift: 0 6px 18px -10px rgba(5, 9, 61, 0.16), 0 1px 3px rgba(5, 9, 61, 0.05);
+    --scrim: rgba(5, 9, 61, 0.45);
+    --skeleton-a: #efe9e5;
+    --skeleton-b: #f8f3f0;
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%235a5b5f'%3E%3Cpath d='M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32z'/%3E%3C/svg%3E");
+    --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%23053CA3'%3E%3Cpath d='M213.66 82.34l-56-56A8 8 0 0 0 152 24H56a16 16 0 0 0-16 16v176a16 16 0 0 0 16 16h144a16 16 0 0 0 16-16V88a8 8 0 0 0-2.34-5.66ZM160 51.31L188.69 80H160ZM200 216H56V40h88v48a8 8 0 0 0 8 8h48v120Zm-48-80a8 8 0 0 1-8 8h-16v16a8 8 0 0 1-16 0v-16h-16a8 8 0 0 1 0-16h16v-16a8 8 0 0 1 16 0v16h16a8 8 0 0 1 8 8Z'/%3E%3C/svg%3E");
     /* composed values for base styles */
-    --accent: #f07822;
+    --accent: #ff6e00;
     /* Focus ring: a step darker in light so the ring reaches 3:1 on white; the brand orange itself in dark. */
-    --accent-focus: #d9660f;
+    --accent-focus: #e56300;
     --accent-soft: rgb(var(--c-accent-100));
     --ink: rgb(var(--c-ink));
     --line-2: rgb(var(--c-line-2));
@@ -85,52 +87,53 @@
      barely there, off-white ink, brand blue lightened to read as text, meaning colours brightened
      so dots and bars carry on a dark ground. Orange is unchanged and still carries ink text. */
   :root[data-theme="dark"] {
-    --c-canvas: 15 21 32;
-    --c-surface: 22 29 43;
-    --c-surface-2: 29 38 55;
-    --c-surface-3: 38 49 69;
-    --c-line: 39 51 74;
-    --c-line-2: 63 78 110;
-    --c-ink: 230 236 245;
-    --c-ink-2: 179 191 209;
-    --c-ink-3: 134 148 171;
-    --c-ink-contrast: 15 21 32;
-    --c-rail: 13 26 51;
-    --c-rail-ink: 238 243 251;
-    --c-rail-muted: 147 168 204;
-    --c-rail-dim: 106 128 168;
-    --c-brand-50: 23 34 56;
-    --c-brand-100: 28 44 75;
-    --c-brand-200: 46 70 112;
-    --c-brand-300: 78 111 168;
-    --c-brand-500: 157 188 240;
-    --c-brand-600: 134 169 230;
-    --c-brand-700: 185 205 242;
-    --c-brand-800: 210 224 247;
-    --c-brand-900: 0 0 0;
-    --c-brand-fill: 46 79 140;
+    --c-canvas: 17 21 42;
+    --c-surface: 26 31 56;
+    --c-surface-2: 34 40 68;
+    --c-surface-3: 44 52 86;
+    --c-line: 42 49 82;
+    --c-line-2: 62 71 112;
+    --c-ink: 202 198 195;
+    --c-ink-2: 161 157 154;
+    --c-ink-3: 150 146 143;
+    --c-ink-contrast: 17 21 42;
+    --c-rail: 2 4 14;
+    --c-rail-ink: 226 223 220;
+    --c-rail-muted: 167 174 224;
+    --c-rail-dim: 122 131 196;
+    --c-brand-50: 20 26 56;
+    --c-brand-100: 27 36 80;
+    --c-brand-200: 43 58 118;
+    --c-brand-300: 76 103 184;
+    --c-brand-500: 122 160 226;
+    --c-brand-600: 105 148 232;
+    --c-brand-700: 160 182 229;
+    --c-brand-800: 204 220 255;
+    --c-brand-900: 230 238 255;
+    --c-brand-fill: 29 79 168;
     --c-brand-fill-ink: 255 255 255;
-    --c-accent-50: 43 26 14;
-    --c-accent-100: 61 35 19;
-    --c-accent-200: 90 50 24;
-    --c-ok: 61 191 122;
+    --c-link: 136 169 224;
+    --c-accent-50: 43 22 7;
+    --c-accent-100: 61 32 14;
+    --c-accent-200: 92 49 21;
+    --c-ok: 79 177 131;
     --c-ok-soft: 15 42 29;
-    --c-ok-strong: 126 221 168;
-    --c-warn: 228 163 59;
+    --c-ok-strong: 128 197 161;
+    --c-warn: 217 160 85;
     --c-warn-soft: 44 34 16;
-    --c-warn-strong: 242 192 103;
-    --c-bad: 240 112 95;
-    --c-bad-soft: 51 23 20;
-    --c-bad-strong: 248 160 148;
-    --c-cls-exact: 61 191 122;
-    --c-cls-equivalent: 56 182 194;
-    --c-cls-potential: 228 163 59;
-    --c-cls-mismatch: 240 112 95;
-    --c-cls-missing: 182 133 217;
+    --c-warn-strong: 216 178 116;
+    --c-bad: 232 131 111;
+    --c-bad-soft: 58 28 23;
+    --c-bad-strong: 228 156 143;
+    --c-cls-exact: 79 177 131;
+    --c-cls-equivalent: 82 172 182;
+    --c-cls-potential: 217 160 85;
+    --c-cls-mismatch: 232 131 111;
+    --c-cls-missing: 176 140 206;
     --c-cls-equivalent-soft: 15 42 46;
-    --c-cls-equivalent-strong: 122 221 230;
+    --c-cls-equivalent-strong: 127 197 205;
     --c-cls-missing-soft: 42 26 58;
-    --c-cls-missing-strong: 210 176 238;
+    --c-cls-missing-strong: 193 169 217;
     --c-sev-blocker: 163 35 35;
     --c-sev-major: 193 58 43;
     --c-sev-minor: 228 163 59;
@@ -138,10 +141,11 @@
     --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.45);
     --shadow-lift: 0 6px 18px -8px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.4);
     --scrim: rgba(0, 0, 0, 0.6);
-    --skeleton-a: #1d2637;
-    --skeleton-b: #263145;
-    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%23b3bfd1'%3E%3Cpath d='M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32z'/%3E%3C/svg%3E");
-    --accent-focus: #f07822;
+    --skeleton-a: #171d3e;
+    --skeleton-b: #222951;
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%23bdb9b6'%3E%3Cpath d='M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32z'/%3E%3C/svg%3E");
+    --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%23A8C4FF'%3E%3Cpath d='M213.66 82.34l-56-56A8 8 0 0 0 152 24H56a16 16 0 0 0-16 16v176a16 16 0 0 0 16 16h144a16 16 0 0 0 16-16V88a8 8 0 0 0-2.34-5.66ZM160 51.31L188.69 80H160ZM200 216H56V40h88v48a8 8 0 0 0 8 8h48v120Zm-48-80a8 8 0 0 1-8 8h-16v16a8 8 0 0 1-16 0v-16h-16a8 8 0 0 1 0-16h16v-16a8 8 0 0 1 16 0v16h16a8 8 0 0 1 8 8Z'/%3E%3C/svg%3E");
+    --accent-focus: #ff6e00;
     color-scheme: dark;
   }
 
@@ -190,12 +194,14 @@
     text-wrap: balance;
   }
   a {
-    @apply text-brand-600;
+    /* The token directly rather than @apply text-link: base styles should not depend on a
+       utility being generated, and a running dev server does not always reload the config. */
+    color: rgb(var(--c-link));
     text-underline-offset: 3px;
     text-decoration-thickness: 1px;
   }
   a:hover {
-    @apply text-brand-500;
+    color: rgb(var(--c-brand-500));
   }
   button,
   input,
@@ -242,13 +248,15 @@
   .btn-primary {
     @apply bg-accent-500 text-accent-ink border-accent-500;
   }
+  /* Hover darkens rather than lightens, because the label turns white: white on the resting
+     orange is 2.8:1 and unreadable, white on accent-700 is 4.9:1. */
   @media (hover: hover) and (pointer: fine) {
     .btn-primary:hover:not(:disabled) {
-      @apply bg-accent-400 border-accent-400;
+      @apply bg-accent-700 border-accent-700 text-white;
     }
   }
   .btn-primary:active:not(:disabled) {
-    @apply bg-accent-600 border-accent-600;
+    @apply bg-accent-700 border-accent-700 text-white;
   }
   .btn-ghost {
     @apply bg-transparent border-transparent text-ink-2;
@@ -268,6 +276,40 @@
   }
   .btn-sm {
     @apply h-8 px-2.5 text-xs rounded;
+  }
+
+  /* ---- file pickers ------------------------------------------------------------------
+     Every `<input type="file">` in the tool wears this. The bare class styles the input
+     itself (the browser's "no file selected" text); the pseudo-element is the button the
+     browser draws, which is the only way to reach it. Change the picker here, once. */
+  .file-input {
+    @apply block w-full text-sm text-ink-2;
+  }
+  .file-input::file-selector-button {
+    /* The shape of a pill button, drawn on a pseudo-element: no flexbox and no child to hold an
+       icon, so the icon is a background image and the padding makes room for it. Sized by hand
+       rather than with btn-sm, because @apply btn-sm also drags in .btn-icon.btn-sm. */
+    @apply h-9 pl-9 pr-4 mr-3 rounded-lg border-0 cursor-pointer
+      bg-brand-100 text-brand-700 text-xs font-semibold
+      transition-[background-color,color] duration-150 ease-out;
+    background-image: var(--file-icon);
+    background-repeat: no-repeat;
+    background-position: left 0.75rem center;
+    background-size: 1rem 1rem;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .file-input:not(:disabled)::file-selector-button:hover {
+      @apply bg-brand-200;
+    }
+  }
+  /* The rail's collapse control: a small square that borrows the rail's own ink rather than any
+     button variant, so it stays quiet against the navy until it is wanted. */
+  .rail-toggle {
+    @apply w-6 h-6 shrink-0 place-items-center rounded text-rail-muted
+      transition-colors duration-150 ease-out;
+  }
+  .rail-toggle:hover {
+    @apply bg-rail-ink/10 text-rail-ink;
   }
   .btn-lg {
     @apply h-11 px-5 text-base rounded-lg;
@@ -377,10 +419,15 @@
       @apply bg-brand-50;
     }
   }
+  /* One marker for the row, on its first cell. Putting the inset shadow on every `td` drew a
+     bar down each column border, and orange on the blue selected fill fought with it. */
   .tbl tr.selected td,
   .tbl tr[data-selected="true"] td {
     @apply bg-brand-100;
-    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .tbl tr.selected td:first-child,
+  .tbl tr[data-selected="true"] td:first-child {
+    box-shadow: inset 3px 0 0 rgb(var(--c-brand-600));
   }
   .mono {
     @apply font-mono text-[0.8125em];

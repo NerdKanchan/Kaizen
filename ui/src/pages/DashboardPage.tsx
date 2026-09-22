@@ -90,9 +90,9 @@ export default function DashboardPage() {
             <span>
               terminology <span className="mono" title={r.terminology_version}>{shortSha(r.terminology_version)}</span> · {r.terminology_count} relationships
             </span>
-            <span className="mono truncate max-w-[40ch]" title={r.input_root}>
-              {r.input_root}
-            </span>
+            {/* The input folder is deliberately not shown here: it is the widest thing on the line,
+                a reviewer never needs it mid-review, and it is an absolute local path. It stays
+                recorded in the workbook's run-info sheet and on the certificate. */}
           </>
         }
         actions={
@@ -295,14 +295,16 @@ export default function DashboardPage() {
             <CardHead title="PCO coverage and SKU sets" count={`${coverageIssues.length} issue${coverageIssues.length === 1 ? "" : "s"}`} />
             <div className="max-h-80 overflow-auto">
               <div className="overflow-x-auto">
-                <table className="tbl">
+                {/* A min width so the card scrolls sideways instead of squeezing `source` down to
+                    one character per line; the source paths wrap on separators, not mid-token. */}
+                <table className="tbl min-w-[52rem]">
                   <thead>
                     <tr>
                       <th>Status</th>
                       <th>Kind</th>
                       <th>SKU</th>
-                      <th>Detail</th>
-                      <th>Source</th>
+                      <th className="min-w-[20rem]">Detail</th>
+                      <th className="min-w-[14rem]">Source</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -316,7 +318,7 @@ export default function DashboardPage() {
                             <td className="text-ink-3">{c.kind.replace(/_/g, " ")}</td>
                             <td className="mono">{c.sku}</td>
                             <td className={bad ? "text-bad-strong font-medium" : ""}>{c.detail}</td>
-                            <td className="mono text-ink-3 break-all">{c.source}</td>
+                            <td className="mono text-ink-3 break-words">{c.source}</td>
                           </tr>
                         );
                       })}

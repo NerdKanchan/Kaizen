@@ -185,8 +185,8 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
   if (!open) return null;
   const w = width === "sm" ? "max-w-md" : width === "lg" ? "max-w-3xl" : "max-w-xl";
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh] scrim enter-fade" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={panel} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} className={`w-full ${w} card shadow-pop enter-pop`}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 scrim enter-fade" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} className={`w-full ${w} max-h-[calc(100vh-2rem)] overflow-y-auto card shadow-pop enter-pop`}>
         <div className="flex items-start gap-3 px-5 pt-4 pb-3">
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold">{title}</h2>

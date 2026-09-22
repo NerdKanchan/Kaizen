@@ -122,9 +122,6 @@ export default function TerminologyPage() {
         description="The rules that let the next run clear a wording it has already seen. Reviewers maintain them; they are not model weights, and every run records the exact versions it used."
         actions={
           <>
-            <AnchorButton href={api.terminology.exportUrl()} download icon={<FileXls size={16} />}>
-              Export .xlsx
-            </AnchorButton>
             <Button variant="primary" icon={<Plus size={16} />} onClick={() => setCreating(true)}>
               New relationship
             </Button>
@@ -308,7 +305,7 @@ export default function TerminologyPage() {
                   id="terminology-import"
                   type="file"
                   accept=".xlsx,.csv"
-                  className="block w-full text-sm text-ink-2 file:btn file:btn-sm file:mr-3"
+                  className="file-input"
                   onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
                 />
               </Field>

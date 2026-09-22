@@ -101,8 +101,8 @@ export function SignIn() {
       </div>
       <form onSubmit={submit} className="w-full max-w-[30rem] card shadow-pop p-7 enter-pop">
         <div className="flex items-center gap-3 mb-6">
-          <span className="w-9 h-9 rounded-md bg-accent-500 grid place-items-center font-semibold text-accent-ink" aria-hidden>
-            K
+          <span className="w-11 h-11 rounded-md bg-white grid place-items-center px-1.5 ring-1 ring-black/5" aria-hidden>
+            <img src="/bd-logo.png" alt="" className="w-full" />
           </span>
           <div className="leading-tight">
             <div className="text-lg font-semibold tracking-tight">Kaizen Cross-Check</div>

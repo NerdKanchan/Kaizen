@@ -15,6 +15,8 @@ export default {
       },
       colors: {
         canvas: v("canvas"),
+        // Hyperlinks have their own token so they never drift from the brand scale.
+        link: v("link"),
         surface: { DEFAULT: v("surface"), 2: v("surface-2"), 3: v("surface-3") },
         line: { DEFAULT: v("line"), 2: v("line-2") },
         // ink-contrast is the text colour that sits on an ink-filled shape (white in light, canvas in dark).
@@ -37,7 +39,7 @@ export default {
         },
         // BD orange is the same in both themes; only its soft surfaces change. accent-ink is the text
         // colour on orange: always ink, never white (DESIGN.md).
-        accent: { 50: v("accent-50"), 100: v("accent-100"), 200: v("accent-200"), 400: "#F5924A", 500: "#F07822", 600: "#D9660F", 700: "#B5540C", ink: "#0F1F35" },
+        accent: { 50: v("accent-50"), 100: v("accent-100"), 200: v("accent-200"), 400: "#FF8A33", 500: "#FF6E00", 600: "#E56300", 700: "#B84E00", ink: "#05093D" },
         ok: { DEFAULT: v("ok"), soft: v("ok-soft"), strong: v("ok-strong") },
         warn: { DEFAULT: v("warn"), soft: v("warn-soft"), strong: v("warn-strong") },
         bad: { DEFAULT: v("bad"), soft: v("bad-soft"), strong: v("bad-strong") },
@@ -56,12 +58,12 @@ export default {
         sev: { blocker: v("sev-blocker"), major: v("sev-major"), minor: v("sev-minor"), info: v("sev-info") },
       },
       fontSize: {
-        "2xs": ["0.6875rem", { lineHeight: "1rem" }],
-        xs: ["0.75rem", { lineHeight: "1rem" }],
-        sm: ["0.8125rem", { lineHeight: "1.125rem" }],
-        base: ["0.875rem", { lineHeight: "1.25rem" }],
-        md: ["1rem", { lineHeight: "1.5rem" }],
-        lg: ["1.125rem", { lineHeight: "1.625rem" }],
+        "2xs": ["0.6875rem", { lineHeight: "1.0625rem" }],
+        xs: ["0.75rem", { lineHeight: "1.125rem" }],
+        sm: ["0.8125rem", { lineHeight: "1.25rem" }],
+        base: ["0.875rem", { lineHeight: "1.375rem" }],
+        md: ["1rem", { lineHeight: "1.625rem" }],
+        lg: ["1.125rem", { lineHeight: "1.75rem" }],
         xl: ["1.25rem", { lineHeight: "1.75rem" }],
         "2xl": ["1.375rem", { lineHeight: "1.75rem", letterSpacing: "-0.01em" }],
         "3xl": ["1.75rem", { lineHeight: "2.125rem", letterSpacing: "-0.015em" }],
@@ -71,7 +73,7 @@ export default {
       boxShadow: {
         pop: "var(--shadow-pop)",
         lift: "var(--shadow-lift)",
-        ring: "0 0 0 2px rgb(var(--c-surface)), 0 0 0 4px #F07822",
+        ring: "0 0 0 2px rgb(var(--c-surface)), 0 0 0 4px var(--accent-focus)",
       },
       transitionTimingFunction: {
         out: "cubic-bezier(0.16, 1, 0.3, 1)",

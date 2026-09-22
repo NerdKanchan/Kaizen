@@ -16,48 +16,58 @@ barely there, off-white ink, and the same orange. It is composed, not inverted (
 
 ## Colour
 
-Brand, from BD's identity (Pantone 2755 blue, Pantone 1665 orange):
+Brand, from BD's identity. Navy is the structural colour, BD blue carries links and emphasis, and
+orange is reserved for the one action that matters on a screen.
 
 | Token | Hex | Use |
 |---|---|---|
-| `brand-700` | `#12305F` | Navigation rail, strongest brand text |
-| `brand-600` | `#194890` | BD blue: links, selected states, structural emphasis, INFO |
-| `brand-500` | `#1F5AB0` | Hover on blue |
-| `brand-100` | `#E8EEF8` | Selected row, soft blue surfaces |
-| `accent-600` | `#D9660F` | Orange pressed |
-| `accent-500` | `#F07822` | BD orange: primary action, active nav marker, focus ring, caret, selection |
-| `accent-100` | `#FDEBDD` | Orange soft surface |
+| `brand-900` / `brand-fill` | `#05093D` | Navy: navigation rail, filled brand chips |
+| `brand-700` | `#053CA3` | Strongest brand text |
+| `brand-600` | `#044ED7` | BD blue: selected states, structural emphasis, INFO |
+| `brand-500` | `#1D74FF` | Bright blue: hover on blue |
+| `brand-100` | `#E0EAFD` | Selected row, soft blue surfaces, file-picker button |
+| `rail-dim` | `#9199D8` | Periwinkle: section labels in the rail |
+| `link` | `#044DD6` | Hyperlinks, visited and unvisited alike |
+| `accent-600` | `#E56300` | Orange pressed, and the focus ring in light |
+| `accent-500` | `#FF6E00` | BD orange: primary action, active nav marker, caret, selection |
+| `accent-100` | `#FFE4D1` | Orange soft surface |
 
-Neutrals, one family, tinted toward the blue:
+Neutrals, one family, warmed rather than blue-tinted — the page is off-white paper, not a screen:
 
 | Token | Hex | Use |
 |---|---|---|
-| `canvas` | `#F4F6F9` | Page background |
+| `canvas` | `#F9F4F1` | Warm off-white page background |
 | `surface` | `#FFFFFF` | Cards, tables, inputs |
-| `surface-2` | `#EDF1F6` | Toolbars, side panels, table headers |
-| `line` | `#DCE3EC` | Hairline borders |
-| `line-2` | `#B8C4D4` | Stronger borders, input borders on hover |
-| `ink` | `#0F1F35` | Primary text |
-| `ink-2` | `#3D4F66` | Secondary text |
-| `ink-3` | `#5C6E86` | Muted text and placeholders: 5.3:1 on white, 4.6:1 on `surface-2` |
+| `surface-2` | `#F3EDE9` | Toolbars, side panels, table headers |
+| `line` | `#E6E0DC` | Hairline borders |
+| `line-2` | `#DBD8D7` | Warm grey: stronger borders, input borders on hover |
+| `ink` | `#3D3E41` | Charcoal: primary body text, 9.4:1 on canvas |
+| `ink-2` | `#5A5B5F` | Secondary text, 6.1:1 on canvas |
+| `ink-3` | `#6B6C71` | Muted text and placeholders, 4.6:1 on canvas |
 
 Semantic (state), separate from brand:
 
 | Token | Hex | Meaning |
 |---|---|---|
-| `ok` / `ok-soft` | `#1E7F4F` / `#E3F4EA` | success, cleared |
-| `warn` / `warn-soft` | `#B7791F` / `#FBF1DC` | needs attention |
-| `bad` / `bad-soft` | `#C13A2B` / `#FBE7E4` | failure, blocker |
+| `ok` / `ok-soft` | `#1E7F4F` / `#E4F2EA` | success, cleared |
+| `warn` / `warn-soft` | `#B7791F` / `#FAF0DC` | needs attention |
+| `bad` / `bad-soft` | `#CE4B35` / `#FDEDE9` | failure, blocker |
 
 Classification (carried by colour and word, always together): EXACT `#1E7F4F`, EQUIVALENT `#0E7C86`,
-POTENTIAL `#B7791F`, MISMATCH `#C13A2B`, MISSING `#7E3AA6`. Severity: BLOCKER `#7A1F1F`, MAJOR
-`#C13A2B`, MINOR `#B7791F`, INFO `#194890`. Missing is plum, never orange: orange belongs to the brand.
+POTENTIAL `#B7791F`, MISMATCH `#CE4B35`, MISSING `#7E3AA6`. Severity: BLOCKER `#7A1F1F`, MAJOR
+`#C13A2B`, MINOR `#B7791F`, INFO `#044ED7`. Missing is plum, never orange: orange belongs to the brand.
 Filled severity badges carry white text only where it reaches 4.5:1 (blocker, major, info); the minor
 badge is soft amber with dark amber text.
 
-Contrast floor 4.5:1 for body and placeholder text, 3:1 for large text. Primary buttons are orange
-with ink text (5.9:1); white on orange is never used for text. The focus ring is `accent-600` in light
-(3.6:1 on white) and `accent-500` in dark.
+Dark is tuned for a long session rather than for maximum separation: body text sits at 9.5:1 on a
+card, not the 14:1 a near-white ink would give, and every accent is pulled back from full saturation.
+The floor still holds everywhere — muted text on a table header, the tightest pair, is 4.7:1.
+
+Contrast floor 4.5:1 for body and placeholder text, 3:1 for large text; every pair in both themes is
+measured, and the lowest real pair is `ink-3` on `canvas` at 4.6:1. A primary button rests as orange
+with navy text (6.7:1); on hover and press the fill darkens to `accent-700` and the label turns white
+(5.1:1). White is never placed on the resting orange, where it would be 2.8:1. The focus ring is `accent-600` in light
+(3.5:1 on white) and `accent-500` in dark.
 
 ### Dark theme
 
@@ -70,22 +80,22 @@ scrollbars and form controls render in it too.
 
 | Token | Dark | Note |
 |---|---|---|
-| `canvas` | `#0F1520` | blue-black, not grey |
-| `surface` / `surface-2` / `surface-3` | `#161D2B` / `#1D2637` / `#263145` | one step lighter per level |
-| `line` / `line-2` | `#27334A` / `#3F4E6E` | hairlines 1.3:1, input borders 2:1 |
-| `ink` / `ink-2` / `ink-3` | `#E6ECF5` / `#B3BFD1` / `#8694AB` | 14:1, 9:1, 5.5:1 on `surface` |
-| `rail` / `rail-ink` / `rail-muted` | `#0D1A33` / `#EEF3FB` / `#93A8CC` | a deeper BD navy with a hairline edge |
-| `brand-600` (links) | `#86A9E6` | BD blue lightened until it reads as text (7.1:1) |
-| `brand-100` / `brand-700` | `#1C2C4B` / `#B9CDF2` | soft blue surface and the text on it |
-| `brand-fill` | `#2E4F8C` | filled brand chip, white text (8:1) |
-| `accent-500` | `#F07822` | unchanged; text on it is always ink |
-| `accent-50` / `accent-100` | `#2B1A0E` / `#3D2313` | soft orange surfaces, selection, focus halo |
-| `ok` / `ok-soft` / `ok-strong` | `#3DBF7A` / `#0F2A1D` / `#7EDDA8` | strong on soft 9.3:1 |
-| `warn` / `warn-soft` / `warn-strong` | `#E4A33B` / `#2C2210` / `#F2C067` | 9.3:1 |
-| `bad` / `bad-soft` / `bad-strong` | `#F0705F` / `#331714` / `#F8A094` | 8.2:1 |
-| Classification dots and bars | EXACT `#3DBF7A`, EQUIVALENT `#38B6C2`, POTENTIAL `#E4A33B`, MISMATCH `#F0705F`, MISSING `#B685D9` | brightened so they carry on a dark ground |
+| `canvas` | `#11152A` | navy, lifted well off black; the whole theme is tuned down, not inverted |
+| `surface` / `surface-2` / `surface-3` | `#1A1F38` / `#222844` / `#2C3456` | one step lighter per level, 1.1:1 apart |
+| `line` / `line-2` | `#2A3152` / `#3E4770` | hairlines 1.3:1, input borders 2:1 |
+| `ink` / `ink-2` / `ink-3` | `#CAC6C3` / `#A19D9A` / `#96928F` | warm grey, deliberately short of white: body text is 9.5:1, not 14:1 |
+| `rail` / `rail-ink` / `rail-muted` | `#04071C` / `#F2F0EE` / `#A7AEE0` | a deeper BD navy with a hairline edge |
+| `brand-600` / `link` | `#6994E8` / `#88A9E0` | BD blue lightened until it reads as text, without glare |
+| `brand-100` / `brand-700` | `#1B2450` / `#A6BEF0` | soft blue surface and the text on it |
+| `brand-fill` | `#1D4FA8` | filled brand chip, white text |
+| `accent-500` | `#FF6E00` | unchanged; text on it is always navy |
+| `accent-50` / `accent-100` | `#2B1607` / `#3D200E` | soft orange surfaces, selection, focus halo |
+| `ok` / `ok-soft` / `ok-strong` | `#4FB183` / `#0F2A1D` / `#86D0A9` | strong on soft 8:1 |
+| `warn` / `warn-soft` / `warn-strong` | `#D9A055` / `#2C2210` / `#E2BA79` | 8.3:1 |
+| `bad` / `bad-soft` / `bad-strong` | `#E8836F` / `#3A1C17` / `#EEA396` | 7.1:1 |
+| Classification dots and bars | EXACT `#3DBF7A`, EQUIVALENT `#38B6C2`, POTENTIAL `#E4A33B`, MISMATCH `#E8836F`, MISSING `#B08CCE` | lifted so they carry on a dark ground without glaring |
 | Severity fills | BLOCKER `#A32323`, MAJOR `#C13A2B`, INFO `#2B63C7` | white text 5.4:1 or better |
-| Scrim | `rgba(0,0,0,.6)` | light uses `rgba(9,26,53,.4)` |
+| Scrim | `rgba(0,0,0,.6)` | light uses `rgba(5,9,61,.45)` |
 | Shadows | `rgba(0,0,0,.7)` and `.45` | tinted shadows do not read on dark |
 
 Rules that hold in the dark: orange is unchanged and still carries ink text; meaning colours stay

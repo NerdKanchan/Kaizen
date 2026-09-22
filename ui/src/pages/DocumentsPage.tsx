@@ -61,6 +61,7 @@ export default function DocumentsPage() {
   return (
     <div>
       <PageHeader
+        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
         title="Documents"
         description="Every file this run parsed, grouped by the SKU set it belongs to. Open a document to check the extraction line by line against the page it came from."
         meta={

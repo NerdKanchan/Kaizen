@@ -38,9 +38,9 @@ export default function ReviewQueuePage() {
     if (v) n.set(k, v);
     else n.delete(k);
     if (k !== "offset") n.delete("offset");
-    setSp(n);
+    setSp(n, { replace: true });
   };
-  const clear = () => setSp(new URLSearchParams());
+  const clear = () => setSp(new URLSearchParams(), { replace: true });
   const open = (rowId: string) => nav(`/runs/${enc(runId)}/rows/${enc(rowId)}?${queueParams(sp).toString()}`);
   const activeFilters = ["sku", "check", "discrepancy", "severity", "classification", "state", "role", "q"].filter((k) => sp.get(k)).length + (sp.get("nv") === "0" ? 1 : 0);
 
@@ -127,6 +127,7 @@ export default function ReviewQueuePage() {
     <div>
       <HotkeyHelp open={help} onClose={() => setHelp(false)} />
       <PageHeader
+        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
         title="Review queue"
         description="Ordered by the engine: blockers, then major, ambiguous, potential and low-confidence rows. Open a row to see both documents and decide."
         meta={<HotkeyHint />}

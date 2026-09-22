@@ -7,7 +7,7 @@ import { Badge } from "../components/Badges";
 import { ErrorBox } from "../components/Feedback";
 import { BAD_COLOR, BRAND_COLOR, MiniBar, Stat } from "../components/Stat";
 import { Button, Card, CardHead, Field, PageHeader, SectionTitle, Skeleton } from "../components/ui";
-import { fmtMoney, pct } from "../lib/format";
+import { enc, fmtMoney, pct } from "../lib/format";
 import { useToast } from "../lib/toast";
 import { useAsync } from "../lib/useAsync";
 import type { BusinessParams } from "../types";
@@ -61,13 +61,13 @@ export default function BusinessCasePage() {
         changed += 1;
       }
     }
-    setSp(n);
+    setSp(n, { replace: true });
     const note = changed === 0 ? "Every figure is back at the brief's default." : changed === 1 ? "One figure differs from the brief's defaults, and the page address carries it." : `${changed} figures differ from the brief's defaults, and the page address carries them.`;
     toast({ tone: "ok", title: "Assumptions applied", description: note });
   };
 
   const reset = () => {
-    setSp(new URLSearchParams());
+    setSp(new URLSearchParams(), { replace: true });
     toast({ tone: "info", title: "Assumptions reset", description: "Back to the figures in the brief." });
   };
 
@@ -82,6 +82,7 @@ export default function BusinessCasePage() {
   return (
     <div>
       <PageHeader
+        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
         title="Business case"
         description="What this run does to review effort, counted from its own rows. Nothing here assumes the engine is right: it counts what was cleared and what still needs a person."
         meta={

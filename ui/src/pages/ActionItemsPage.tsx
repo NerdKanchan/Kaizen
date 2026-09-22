@@ -25,14 +25,14 @@ export default function ActionItemsPage() {
     const n = new URLSearchParams(sp);
     if (v) n.set(k, v);
     else n.delete(k);
-    setSp(n);
+    setSp(n, { replace: true });
   };
   const filtered = Boolean(status || runFilter);
   const clearFilters = () => {
     const n = new URLSearchParams(sp);
     n.delete("status");
     n.delete("run_id");
-    setSp(n);
+    setSp(n, { replace: true });
   };
 
   return (

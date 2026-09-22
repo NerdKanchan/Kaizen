@@ -54,6 +54,7 @@ export default function DiffPage() {
   return (
     <div>
       <PageHeader
+        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
         title="Compare runs"
         description="After corrected documents come back, this shows only what moved. Rows are matched by their comparison key, so a row that was renumbered still lines up."
         meta={
@@ -79,7 +80,7 @@ export default function DiffPage() {
                 const n = new URLSearchParams(sp);
                 if (e.target.value) n.set("against", e.target.value);
                 else n.delete("against");
-                setSp(n);
+                setSp(n, { replace: true });
               }}
             >
               <option value="">Choose an earlier run</option>

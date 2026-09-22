@@ -82,7 +82,7 @@ export function ImportDecisions({ runId, onApplied }: { runId: string; onApplied
         <input
           type="file"
           accept=".xlsx"
-          className="text-sm text-ink-2 file:btn file:btn-sm file:mr-3"
+          className="file-input"
           onChange={(e) => {
             setFile(e.target.files?.[0] ?? null);
             setPreview(null);

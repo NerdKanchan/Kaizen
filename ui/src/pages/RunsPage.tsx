@@ -67,7 +67,7 @@ export default function RunsPage() {
                 <span className="text-sm font-semibold">Drop a project folder</span>
               </div>
               <p className="text-sm text-ink-3 flex-1">Choose the folder that holds the SKU sub-folders and PCO spreadsheets. Relative paths are kept, so grouping works as on disk.</p>
-              <input ref={fileRef} type="file" multiple {...DIR_PROPS} className="text-sm text-ink-2 file:btn file:btn-sm file:mr-3" onChange={(e) => setFileCount(e.target.files?.length ?? 0)} aria-label="Project folder" />
+              <input ref={fileRef} type="file" multiple {...DIR_PROPS} className="file-input" onChange={(e) => setFileCount(e.target.files?.length ?? 0)} aria-label="Project folder" />
               <Button loading={busy === "upload"} disabled={busy !== null || fileCount === 0} onClick={upload}>
                 {fileCount ? `Upload ${fileCount} file${fileCount === 1 ? "" : "s"} and run` : "Upload and run"}
               </Button>

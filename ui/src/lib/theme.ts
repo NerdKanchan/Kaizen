@@ -9,7 +9,7 @@ export type ThemeChoice = Theme | "system";
 export const THEME_KEY = "kaizen.theme";
 
 /** Browser chrome colour (meta theme-color): the navigation rail's colour in each theme. */
-export const THEME_COLOR: Record<Theme, string> = { light: "#12305F", dark: "#0D1A33" };
+export const THEME_COLOR: Record<Theme, string> = { light: "#030620", dark: "#02040E" };
 
 export interface ThemeStorage {
   getItem(key: string): string | null;

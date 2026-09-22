@@ -1,17 +1,35 @@
 // App shell: a BD-navy navigation rail, a top bar with the run switcher, the theme toggle and the
 // reviewer's identity, and the page. Routes and behaviour are unchanged from the first build.
-import { ChartBar, ClipboardText, Files, Folders, GitDiff, Lightbulb, ListChecks, SignOut, SquaresFour, TextAa } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight, ChartBar, ClipboardText, Files, Folders, GitDiff, Lightbulb, ListChecks, SignOut, SquaresFour, TextAa } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, matchPath, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { displayName, enc } from "../lib/format";
 import { useReviewer } from "../lib/reviewer";
 import { useAsync } from "../lib/useAsync";
+import { ScrollMemory } from "./ScrollMemory";
 import { SignIn } from "./SignIn";
 import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "./ui";
 
 const LAST_RUN_KEY = "kaizen.lastRun";
+const RAIL_KEY = "kaizen.railCollapsed";
+
+// The browser's history menu is how people jump back several steps at once, and it lists document
+// titles. One title for eleven pages makes that menu useless, so every route names itself.
+const SECTIONS: [RegExp, string][] = [
+  [/^\/runs\/[^/]+\/review$/, "Review queue"],
+  [/^\/runs\/[^/]+\/rows\//, "Evidence"],
+  [/^\/runs\/[^/]+\/documents\//, "Document"],
+  [/^\/runs\/[^/]+\/documents$/, "Documents"],
+  [/^\/runs\/[^/]+\/mining$/, "Worklist and mining"],
+  [/^\/runs\/[^/]+\/business$/, "Business case"],
+  [/^\/runs\/[^/]+\/diff$/, "Compare runs"],
+  [/^\/runs\/[^/]+$/, "Dashboard"],
+  [/^\/terminology$/, "Terminology"],
+  [/^\/action-items$/, "Action items"],
+  [/^\/$/, "Runs"],
+];
 
 function initials(name: string): string {
   return name
@@ -44,12 +62,39 @@ export function Layout() {
     }
   }, [routeRun]);
   const runId = routeRun ?? lastRun;
+  useEffect(() => {
+    const section = SECTIONS.find(([re]) => re.test(loc.pathname))?.[1];
+    document.title = [section, routeRun, "Kaizen Cross-Check"].filter(Boolean).join(" · ");
+  }, [loc.pathname, routeRun]);
   const runs = useAsync(() => api.listRuns(), [routeRun]);
+  // The rail collapses two ways: by hand (remembered per browser) and, below lg, because there is
+  // no room. Collapsing by hand only removes the wide state; the narrow one is the same either way.
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(RAIL_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleRail = () =>
+    setRailCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(RAIL_KEY, next ? "1" : "0");
+      } catch {
+        /* private mode: the rail still moves for this page */
+      }
+      return next;
+    });
   const { session, policy, loading, signOut } = useReviewer();
 
   if (loading) return <div className="p-6 text-sm text-ink-3">Loading…</div>;
   if (!session && policy === "required") return <SignIn />;
 
+  // "wide" is the expanded rail: lg and up, and not collapsed by hand.
+  const wideBlock = railCollapsed ? "hidden" : "hidden lg:block";
+  const wideInline = railCollapsed ? "hidden" : "hidden lg:inline";
+  const itemBox = railCollapsed ? "justify-center px-0" : "justify-center lg:justify-start px-0 lg:pl-4 lg:pr-3";
   const r = (suffix: string) => (runId ? `/runs/${enc(runId)}${suffix}` : null);
   const item = (to: string | null, label: string, icon: ReactNode, end = false) =>
     to ? (
@@ -58,7 +103,7 @@ export function Layout() {
         end={end}
         title={label}
         className={({ isActive }) =>
-          `relative flex items-center justify-center lg:justify-start gap-2.5 h-9 px-0 lg:pl-4 lg:pr-3 mx-2 rounded-md text-sm no-underline transition-colors duration-150 ${
+          `relative flex items-center ${itemBox} gap-2.5 h-9 mx-2 rounded-md text-sm no-underline transition-colors duration-150 ${
             isActive ? "bg-rail-ink/10 text-rail-ink font-medium" : "text-rail-muted hover:bg-rail-ink/5 hover:text-rail-ink"
           }`
         }
@@ -67,38 +112,50 @@ export function Layout() {
           <>
             {isActive && <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-accent-500" aria-hidden />}
             <span className="shrink-0 opacity-90">{icon}</span>
-            <span className="truncate hidden lg:inline">{label}</span>
+            <span className={`truncate ${wideInline}`}>{label}</span>
           </>
         )}
       </NavLink>
     ) : (
-      <span className="flex items-center justify-center lg:justify-start gap-2.5 h-9 px-0 lg:pl-4 lg:pr-3 mx-2 rounded-md text-sm text-rail-dim/70 cursor-default" title={`${label}: select a run first`}>
+      <span className={`flex items-center ${itemBox} gap-2.5 h-9 mx-2 rounded-md text-sm text-rail-dim/70 cursor-default`} title={`${label}: select a run first`}>
         <span className="shrink-0">{icon}</span>
-        <span className="truncate hidden lg:inline">{label}</span>
+        <span className={`truncate ${wideInline}`}>{label}</span>
       </span>
     );
 
   return (
     <div className="min-h-screen flex">
+      <ScrollMemory />
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[70] btn btn-primary">
         Skip to content
       </a>
-      <nav className="rail w-16 lg:w-[232px] shrink-0 bg-rail text-rail-ink flex flex-col sticky top-0 h-screen transition-[width] duration-200 ease-out" aria-label="Main">
-        <NavLink to="/" className="flex items-center gap-2.5 h-14 px-4 lg:px-5 no-underline text-rail-ink" title="Kaizen Cross-Check">
-          <span className="w-7 h-7 rounded-md bg-accent-500 grid place-items-center font-semibold text-accent-ink text-sm shrink-0" aria-hidden>
-            K
-          </span>
-          <span className="leading-tight hidden lg:block">
-            <span className="block text-sm font-semibold tracking-tight">Kaizen</span>
-            <span className="block text-2xs text-rail-muted tracking-wide">Cross-Check</span>
-          </span>
-        </NavLink>
-        <div className="mt-2 text-2xs font-medium tracking-wider text-rail-dim px-6 pb-1 hidden lg:block">WORKSPACE</div>
-        {item("/", "Runs", <Folders size={18} />, true)}
-        {item("/terminology", "Terminology", <TextAa size={18} />)}
-        {item("/action-items", "Action items", <ClipboardText size={18} />)}
-        <div className="mt-5 text-2xs font-medium tracking-wider text-rail-dim px-6 pb-1 hidden lg:block">THIS RUN</div>
-        <div className="px-6 pb-1.5 mono text-2xs text-rail-muted/80 truncate hidden lg:block" title={runId ?? undefined}>
+      <nav
+        className={`rail ${railCollapsed ? "w-16" : "w-16 lg:w-[232px]"} shrink-0 bg-rail text-rail-ink flex flex-col sticky top-0 h-screen transition-[width] duration-200 ease-out`}
+        aria-label="Main"
+      >
+        <div className="flex items-center gap-2.5 h-14 px-4 lg:px-5">
+          <NavLink to="/" className="flex items-center gap-2.5 min-w-0 no-underline text-rail-ink" title="BD Kaizen Cross-Check">
+            <span className="w-9 h-9 rounded-md bg-white grid place-items-center shrink-0 px-1 ring-1 ring-black/5" aria-hidden>
+              <img src="/bd-logo.png" alt="" className="w-full" />
+            </span>
+            <span className={`leading-tight ${wideBlock}`}>
+              <span className="block text-sm font-semibold tracking-tight">Kaizen</span>
+              <span className="block text-2xs text-rail-muted tracking-wide">Cross-Check</span>
+            </span>
+          </NavLink>
+          {!railCollapsed && (
+            <button type="button" onClick={toggleRail} className="rail-toggle ml-auto hidden lg:grid" aria-label="Collapse the sidebar" title="Collapse the sidebar">
+              <CaretLeft size={14} weight="bold" />
+            </button>
+          )}
+        </div>
+        {railCollapsed && (
+          <button type="button" onClick={toggleRail} className="rail-toggle mx-auto hidden lg:grid" aria-label="Expand the sidebar" title="Expand the sidebar">
+            <CaretRight size={14} weight="bold" />
+          </button>
+        )}
+        <div className={`mt-2 text-2xs font-medium tracking-wider text-rail-dim px-6 pb-1 ${wideBlock}`}>THIS RUN</div>
+        <div className={`px-6 pb-1.5 mono text-2xs text-rail-muted/80 truncate ${wideBlock}`} title={runId ?? undefined}>
           {runId ?? "none selected"}
         </div>
         {item(r(""), "Dashboard", <SquaresFour size={18} />, true)}
@@ -107,7 +164,12 @@ export function Layout() {
         {item(r("/mining"), "Worklist and mining", <Lightbulb size={18} />)}
         {item(r("/business"), "Business case", <ChartBar size={18} />)}
         {item(r("/diff"), "Compare runs", <GitDiff size={18} />)}
-        <div className="mt-auto px-5 py-4 text-2xs text-rail-dim leading-4 hidden lg:block">The engine recommends. The reviewer decides. Every value is traceable to a page and a box.</div>
+        <div className="pt-6 pb-4">
+          <div className={`text-2xs font-medium tracking-wider text-rail-dim px-6 pb-1 ${wideBlock}`}>WORKSPACE</div>
+          {item("/", "Runs", <Folders size={18} />, true)}
+          {item("/terminology", "Terminology", <TextAa size={18} />)}
+          {item("/action-items", "Action items", <ClipboardText size={18} />)}
+        </div>
       </nav>
 
       <div className="flex-1 min-w-0 flex flex-col">

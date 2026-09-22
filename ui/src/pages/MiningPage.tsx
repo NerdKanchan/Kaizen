@@ -53,6 +53,7 @@ export default function MiningPage() {
   return (
     <div>
       <PageHeader
+        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
         title="Worklist and mining"
         description="Wording pairings the engine matched only by similarity, repeated across SKUs in this run. Approve one and it becomes a versioned relationship, so the next run clears those rows on its own."
       />
