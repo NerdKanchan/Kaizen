@@ -52,7 +52,7 @@ def ocr_page(page: pymupdf.Page, dpi: int = 200) -> OcrResult:
 
 
 def ocr_words(result: OcrResult) -> list[Word]:
-    return [Word(text=t, x0=x0, y0=y0, x1=x1, y1=y1, block=0, line=i, word_no=0) for i, (x0, y0, x1, y1, t, _) in enumerate(result.words)]
+    return [Word(text=t, x0=x0, y0=y0, x1=x1, y1=y1, block=0, line=i, word_no=0, confidence=c) for i, (x0, y0, x1, y1, t, c) in enumerate(result.words)]
 
 
 def ocr_min_confidence(result: OcrResult) -> float:
