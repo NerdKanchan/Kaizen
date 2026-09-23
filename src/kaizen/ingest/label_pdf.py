@@ -23,6 +23,8 @@ PARSER_VERSION = "1"
 _REF_CODE_RE = re.compile(r"^[A-Z0-9]{5,12}$")
 _NUMBER_RE = re.compile(r"^\d+(?:\.\d+)?$")
 _UOM_WORDS = {"EACH", "EA", "PAIR", "PAIRS", "PACK", "PACKS", "PKG", "PCS", "PC", "ROLL", "ROLLS", "SET", "SETS"}
+_FUSED_STARTER_RE = re.compile(r"^\d+(?:\.\d+)?(?:EACH|EA|PAIRS?|PACKS?|PKG|PCS|PC|ROLLS?|SETS?)$", re.IGNORECASE)
+_FUSED_STARTER_PREFIX_RE = re.compile(r"^(?P<head>\d+(?:\.\d+)?(?:EACH|EA|PAIRS?|PACKS?|PKG|PCS|PC|ROLLS?|SETS?))(?P<rest>[-\u2013\u2014:].+)$", re.IGNORECASE)
 _TERMINATOR_PREFIXES = ("store between", "lot ", "assembled", "(01)", "ref ")
 _TERMINATOR_CONTAINS = ("are trademarks", "registered trademark")
 _COLUMN_GAP = 40.0
@@ -31,6 +33,28 @@ _COLUMN_TOLERANCE = 6.0
 
 def _is_starter(words: list[Word], i: int) -> bool:
     return bool(_NUMBER_RE.match(words[i].text)) and i + 1 < len(words) and words[i + 1].text.upper() in _UOM_WORDS
+
+
+def _is_entry_starter(words: list[Word], i: int) -> bool:
+    """Like _is_starter, but also matches a fused quantity+unit token ('1Each') as its own starter — OCR often
+    loses the space between the two, especially where several bullets got merged onto one detected line."""
+    return _is_starter(words, i) or bool(_FUSED_STARTER_RE.match(words[i].text))
+
+
+def _expand_fused_tokens(words: list[Word]) -> list[Word]:
+    """OCR sometimes glues a starter directly onto the next word too ('1Each-StatLockTM'); split such tokens
+    so the starter and the following description text become separate words again, in x0 proportion. The
+    separator is kept on the description word since parse_label_line() requires one between qty/uom and desc."""
+    out: list[Word] = []
+    for w in words:
+        m = _FUSED_STARTER_PREFIX_RE.match(w.text)
+        if not m or not m.group("rest").strip("-\u2013\u2014: "):
+            out.append(w)
+            continue
+        split_x = w.x0 + (w.x1 - w.x0) * len(m.group("head")) / len(w.text)
+        out.append(Word(text=m.group("head"), x0=w.x0, y0=w.y0, x1=split_x, y1=w.y1, block=w.block, line=w.line, word_no=w.word_no, confidence=w.confidence))
+        out.append(Word(text=m.group("rest"), x0=split_x, y0=w.y0, x1=w.x1, y1=w.y1, block=w.block, line=w.line, word_no=w.word_no, confidence=w.confidence))
+    return out
 
 
 def _find_ref(lines: list[list[Word]]) -> tuple[str | None, int, int | None]:
@@ -81,14 +105,14 @@ def parse_label_pdf(path: Path | str) -> Document:
     for page in pdf:
         page_no = page.number + 1
         words = extract_words(page)
-        page_method, confidence_cap = "pdf_text", 1.0
+        page_method = "pdf_text"
         if not words:
             if page.get_images(full=True) and ocr_available():
                 result = ocr_page(page)
                 words = ocr_words(result)
-                page_method, confidence_cap = "ocr", ocr_min_confidence(result)
+                page_method = "ocr"
                 header["ocr_engine"] = result.engine
-                warnings.append(f"page {page_no}: no native text; OCR ({result.engine}, {result.dpi} dpi) produced {len(words)} words, min confidence {confidence_cap:.2f} — verify against the page image")
+                warnings.append(f"page {page_no}: no native text; OCR ({result.engine}, {result.dpi} dpi) produced {len(words)} words, min confidence {ocr_min_confidence(result):.2f} — verify against the page image")
             elif page.get_images(full=True):
                 warnings.append(f"page {page_no}: image-only page and no OCR engine installed (pip install rapidocr-onnxruntime); nothing extracted — OCR NOT IMPLEMENTED in this environment")
             else:
@@ -121,9 +145,9 @@ def parse_label_pdf(path: Path | str) -> Document:
                     warnings.append(f"page {page_no}: unparsed text in contents region skipped: '{text[:60]}'")
                     continue
                 line_count = len({round(w.cy) for w in entry_words})
-                confidence = confidence_cap
+                confidence = min(w.confidence for w in entry_words)  # per-entry, not a page-wide floor
                 if len(parsed.description) < 3 or parsed.description.endswith(","):
-                    confidence = 0.7
+                    confidence = min(confidence, 0.7)
                     warnings.append(f"page {page_no}: suspicious description '{parsed.description}'")
                 bbox = _union([line_bbox([w]) for w in entry_words])
                 items.append(
@@ -188,6 +212,13 @@ def _contents_region(lines: list[list[Word]]) -> list[list[Word]]:
     return region
 
 
+def _split_at_starters(words: list[Word]) -> list[list[Word]]:
+    """Split a column's words on a line at every entry starter, not just the first — OCR frequently merges several
+    kit-content bullets onto one detected line, and a mid-line starter still marks a new entry."""
+    bounds = sorted({0, *(i for i in range(len(words)) if _is_entry_starter(words, i))})
+    return [words[a:b] for a, b in zip(bounds, bounds[1:] + [len(words)])]
+
+
 def _build_entries(region: list[list[Word]], columns: list[float]) -> list[list[list[Word]]]:
     entries: list[list[list[Word]]] = [[] for _ in columns]
     for line in region:
@@ -196,10 +227,14 @@ def _build_entries(region: list[list[Word]], columns: list[float]) -> list[list[
             per_col.setdefault(_column_of(w.x0, columns), []).append(w)
         for col_idx, words in per_col.items():
             words.sort(key=lambda w: w.x0)
-            if _is_starter(words, 0) or not entries[col_idx]:
-                entries[col_idx].append(list(words))
-            else:
-                entries[col_idx][-1].extend(words)
+            words = _expand_fused_tokens(words)
+            for group in _split_at_starters(words):
+                if not group:
+                    continue
+                if _is_entry_starter(group, 0) or not entries[col_idx]:
+                    entries[col_idx].append(list(group))
+                else:
+                    entries[col_idx][-1].extend(group)
     return entries
 
 

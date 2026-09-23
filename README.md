@@ -109,7 +109,18 @@ export KAIZEN_AI_PROVIDER=anthropic ANTHROPIC_API_KEY=...   # optional: KAIZEN_A
 Only the two descriptions and the SKU/item number are sent. Every suggestion is labelled "AI SUGGESTION",
 recorded with provider, model, prompt version and timestamp in the run, and never pairs items on its own.
 Semantic matching (L4) accepts any local embedding function (`kaizen.matching.semantic.SemanticMatcher`).
-OCR uses `rapidocr-onnxruntime` when installed (offline).
+
+## Optional OCR configuration
+Off by default; image-only label pages are reported and skipped without it. To enable the offline OCR
+fallback for scanned/image-only labels:
+```bash
+.venv/bin/pip install rapidocr-onnxruntime
+```
+No other configuration is needed — `kaizen.ingest.ocr.ocr_available()` detects the package at runtime and
+`label_pdf` parsing uses it automatically for pages with no extractable text. Results are marked
+`extraction_method="ocr"` with per-word confidence and a warning naming the engine and DPI used. OCR is
+wired for labels only; scanned BOM prints and drawings are still reported as skipped, not read (see
+`docs/known-limitations.md`).
 
 ## Documents
 `docs/solution-overview.md` (plain-language overview for presenting), `docs/system-description.md` (what was built, module by module),
