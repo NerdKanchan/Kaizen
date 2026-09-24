@@ -30,6 +30,12 @@ _OCR_CORRECTIONS = (
     (re.compile(r"(?<=Isopropyl)(?=Alcohol)", re.IGNORECASE), " "),
     (re.compile(r"(?<=\d)(?=Isopropyl)", re.IGNORECASE), " "),
     (re.compile(r"(?<=pouch)(?=\d|Each)", re.IGNORECASE), " "),
+    (re.compile(r"\bAspirationDevice\b", re.IGNORECASE), "Aspiration Device"),
+    (re.compile(r"\bMicroEZTMMicrointroducer\b", re.IGNORECASE), "MicroEZTM Microintroducer"),
+    (re.compile(r"(\d+(?:\.\d+)?)(CM)(?=X|\d)", re.IGNORECASE), r"\1\2 "),
+    (re.compile(r"(?<=\d)(?=CM\b)", re.IGNORECASE), " "),
+    (re.compile(r"(?<=X)(?=\d)", re.IGNORECASE), " "),
+    (re.compile(r"3CGTM(?=[A-Z])", re.IGNORECASE), "3CGTM "),
 )
 
 

@@ -22,6 +22,11 @@ from kaizen.ingest.ocr import OcrResult, correct_ocr_text, ocr_available
         ("BlueElastic Band", "Blue Elastic Band"),
         ("ECGLeadsAssembly", "ECG Leads Assembly"),
         ("Wipe70%IsopropylAlcohol", "Wipe 70% Isopropyl Alcohol"),
+        ("AspirationDevice", "Aspiration Device"),
+        ("MicroEZTMMicrointroducer", "MicroEZTM Microintroducer"),
+        ("GAUZE 10CMX10CM", "GAUZE 10 CM X 10 CM"),
+        ("GAUZE 5CM X5CM", "GAUZE 5 CM X 5 CM"),
+        ("Sherlock3CGTMSensor", "Sherlock3CGTM Sensor"),
     ],
 )
 def test_correct_ocr_text(raw, expected):
