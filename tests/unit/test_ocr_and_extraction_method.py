@@ -18,6 +18,10 @@ from kaizen.ingest.ocr import OcrResult, correct_ocr_text, ocr_available
         ("70% lsopropyl Alcohol", "70% Isopropyl Alcohol"),
         ("V1ith Sherlock", "with Sherlock"),
         ("Style! Funnel", "Stylet Funnel"),
+        ("SherlockTMSensorHolder", "Sherlock TM Sensor Holder"),
+        ("BlueElastic Band", "Blue Elastic Band"),
+        ("ECGLeadsAssembly", "ECG Leads Assembly"),
+        ("Wipe70%IsopropylAlcohol", "Wipe 70% Isopropyl Alcohol"),
     ],
 )
 def test_correct_ocr_text(raw, expected):

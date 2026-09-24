@@ -140,7 +140,7 @@ def parse_label_pdf(path: Path | str) -> Document:
         for col_idx, col_entries in enumerate(entries):
             for k, entry_words in enumerate(col_entries, start=1):
                 raw_text = " ".join(w.text for w in entry_words)
-                text = correct_ocr_text(raw_text) if page_method == "ocr" else raw_text
+                text = correct_ocr_text(raw_text)
                 parsed = parse_label_line(text)
                 if not parsed.matched:
                     warnings.append(f"page {page_no}: unparsed text in contents region skipped: '{raw_text[:60]}'")
@@ -166,7 +166,7 @@ def parse_label_pdf(path: Path | str) -> Document:
                             "column": col_idx + 1,
                             "line_count": line_count,
                             "raw_line": raw_text,
-                            "ocr_corrected_line": text if page_method == "ocr" else None,
+                            "ocr_corrected_line": text if text != raw_text else None,
                         },
                         category=ItemCategory.PHYSICAL_COMPONENT,
                         category_reason="kit-contents line on the product label",
