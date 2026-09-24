@@ -12,7 +12,7 @@ from pathlib import Path
 import pymupdf
 
 from kaizen.ingest.hashing import document_id, sha256_file
-from kaizen.ingest.ocr import ocr_available, ocr_min_confidence, ocr_page, ocr_words
+from kaizen.ingest.ocr import correct_ocr_text, ocr_available, ocr_min_confidence, ocr_page, ocr_words
 from kaizen.ingest.pdf_words import Word, extract_words, group_lines, line_bbox, line_text
 from kaizen.ingest.quantity import parse_label_line
 from kaizen.models import BBox, DocType, Document, DocumentItem, Evidence, ItemCategory
@@ -139,10 +139,11 @@ def parse_label_pdf(path: Path | str) -> Document:
         entries = _build_entries(region, columns)
         for col_idx, col_entries in enumerate(entries):
             for k, entry_words in enumerate(col_entries, start=1):
-                text = " ".join(w.text for w in entry_words)
+                raw_text = " ".join(w.text for w in entry_words)
+                text = correct_ocr_text(raw_text) if page_method == "ocr" else raw_text
                 parsed = parse_label_line(text)
                 if not parsed.matched:
-                    warnings.append(f"page {page_no}: unparsed text in contents region skipped: '{text[:60]}'")
+                    warnings.append(f"page {page_no}: unparsed text in contents region skipped: '{raw_text[:60]}'")
                     continue
                 line_count = len({round(w.cy) for w in entry_words})
                 confidence = min(w.confidence for w in entry_words)  # per-entry, not a page-wide floor
@@ -161,7 +162,12 @@ def parse_label_pdf(path: Path | str) -> Document:
                         quantity=parsed.quantity,
                         uom=parsed.uom,
                         sub_quantity=parsed.sub_quantity,
-                        attributes={"column": col_idx + 1, "line_count": line_count, "raw_line": text},
+                        attributes={
+                            "column": col_idx + 1,
+                            "line_count": line_count,
+                            "raw_line": raw_text,
+                            "ocr_corrected_line": text if page_method == "ocr" else None,
+                        },
                         category=ItemCategory.PHYSICAL_COMPONENT,
                         category_reason="kit-contents line on the product label",
                         extraction_confidence=confidence,
@@ -170,7 +176,7 @@ def parse_label_pdf(path: Path | str) -> Document:
                             file_sha256=sha,
                             page=page_no,
                             bbox=bbox,
-                            raw_text=text,
+                            raw_text=raw_text,
                             line_index=len(items),
                             locator=f"page {page_no}, contents column {col_idx + 1}, entry {k}",
                             extraction_method=page_method,

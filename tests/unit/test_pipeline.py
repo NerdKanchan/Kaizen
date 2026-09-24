@@ -5,6 +5,7 @@ from kaizen.datasets.pdf_bom import BomRowSpec, BomSpec, render_bom_pdf
 from kaizen.datasets.pdf_label import LabelSpec, render_label_pdf
 from kaizen.models import Classification, Thresholds
 from kaizen.pipeline import discover_files, load_run, run_folder, save_run
+from kaizen.ingest.grouping import identity_key
 from kaizen.terminology.store import RelationshipStore
 
 
@@ -22,6 +23,23 @@ def dataset(tmp_path):
     d.new_page()
     d.save(tmp_path / "sku-002" / "pco_form.pdf")
     return tmp_path
+
+
+def test_identity_key_matches_label_ref_and_bom_parent():
+    assert identity_key("1175108D") == identity_key("1175108DNS") == "1175108"
+
+
+def test_unreadable_label_ref_is_inferred_and_requires_validation(tmp_path):
+    render_bom_pdf(BomSpec(parent_item="1295108DNS", parent_description="KIT", rows=[BomRowSpec(item="0396447", description="ABSORBENT TOWEL")]), tmp_path / "sku" / "bom.pdf")
+    render_label_pdf(LabelSpec(ref="", product_name="Kit", contents=["1 Each - Towel, Absorbent"]), tmp_path / "sku" / "label.pdf")
+
+    run = run_folder(tmp_path, RelationshipStore.default(), Thresholds())
+    label = next(d for d in run.documents if d.doc_type.value == "LABEL")
+    header = next(r for r in run.results if r.role == "header" and r.check.value == "BOM_LABEL")
+    assert label.sku == "1295108D"
+    assert label.header["ref_confidence"] == "inferred"
+    assert header.classification is Classification.POTENTIAL
+    assert header.requires_validation
 
 
 def test_discover_files_is_sorted_and_filtered(dataset):

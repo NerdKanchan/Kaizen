@@ -22,7 +22,7 @@ from kaizen.ingest import bom_pdf, bom_table, drawing_pdf, label_pdf
 from kaizen.ingest import pco as pco_parser
 from kaizen.ingest.bom_categorize import CATEGORIZER_VERSION
 from kaizen.ingest.detect import parse_document
-from kaizen.ingest.grouping import group_by_sku
+from kaizen.ingest.grouping import group_by_sku, identity_key
 from kaizen.ingest.hashing import sha256_file
 from kaizen.matching.ladder import MatchLadder
 from kaizen.matching.normalize import NORMALIZER_VERSION
@@ -106,7 +106,27 @@ def ingest_folder(root: Path | str) -> Ingested:
         else:
             warnings.append(f"{rel}: {outcome.reason}")
             audit.append(AuditEvent(action="document.skipped", detail=f"{rel}: {outcome.reason}"))
+    _infer_unreadable_label_refs(documents, audit)
     return ing
+
+
+def _infer_unreadable_label_refs(documents: list, audit: list[AuditEvent]) -> None:
+    """Use one sibling BOM only as a review-required identity hint when a label REF is unreadable."""
+    for label in (d for d in documents if d.doc_type is DocType.LABEL and not d.sku):
+        siblings = [d for d in documents if d.doc_type is DocType.BOM and Path(d.path).parent == Path(label.path).parent and d.sku]
+        if len(siblings) != 1:
+            continue
+        parent = siblings[0].sku
+        family = identity_key(parent)
+        if not family:
+            continue
+        inferred = f"{family}D"
+        label.sku = inferred
+        label.header["ref"] = inferred
+        label.header["ref_inferred_from"] = "paired_bom"
+        label.header["ref_confidence"] = "inferred"
+        label.warnings.append(f"REF number not readable; inferred {inferred} from paired BOM parent {parent} — verify against the label")
+        audit.append(AuditEvent(action="document.identity_inferred", detail=f"{label.path}: label REF inferred as {inferred} from BOM parent {parent}"))
 
 
 def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds = Thresholds(), provider: AdjudicationProvider | None = None) -> Run:
