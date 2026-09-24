@@ -37,7 +37,7 @@ class Assignment:
 
 
 def _rank(c: Candidate) -> tuple[int, float]:
-    return (LEVEL_RANK[c.outcome.level], c.outcome.score)
+    return (LEVEL_RANK[c.outcome.level], c.outcome.candidate_score if c.outcome.candidate_score is not None else c.outcome.score)
 
 
 def assign(
@@ -76,7 +76,7 @@ def assign(
             if c.a_index == p.a_index
             and c.b_index != p.b_index
             and LEVEL_RANK[c.outcome.level] == LEVEL_RANK[p.outcome.level]
-            and c.outcome.score >= p.outcome.score - delta
+            and (c.outcome.candidate_score if c.outcome.candidate_score is not None else c.outcome.score) >= (p.outcome.candidate_score if p.outcome.candidate_score is not None else p.outcome.score) - delta
         ]
         if alts:
             ambiguous[p.a_index] = alts

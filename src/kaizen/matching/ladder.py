@@ -28,6 +28,7 @@ class MatchOutcome:
     numeric_conflict: bool = False
     weak: bool = False  # above the candidate floor but below the POTENTIAL threshold
     needs_confirmation: bool = False  # pairing is justified but must be shown as POTENTIAL (e.g. anchor with unknown wording)
+    candidate_score: float | None = None
 
     @property
     def matched(self) -> bool:
@@ -91,9 +92,9 @@ class FuzzyMatcher:
 
     def try_match(self, a: NormalizedText, b: NormalizedText, ctx: MatchContext) -> MatchOutcome | None:
         s = similarity(a, b)
-        if s.score < self.thresholds.floor:
+        if s.candidate_score < self.thresholds.floor:
             return None
-        weak = s.score < self.thresholds.potential
+        weak = s.candidate_score < self.thresholds.potential
         label = "WEAK" if weak else "POTENTIAL"
         reason = (
             f'{label}: "{a.raw}" ↔ "{b.raw}"; {s.detail}; threshold {self.thresholds.potential:.2f}'
@@ -101,7 +102,7 @@ class FuzzyMatcher:
         )
         if s.numeric_conflict:
             reason += "; not auto-paired because numeric tokens disagree"
-        return MatchOutcome(MatchLevel.FUZZY, s.score, reason, numeric_conflict=s.numeric_conflict, weak=weak)
+        return MatchOutcome(MatchLevel.FUZZY, s.score, reason, numeric_conflict=s.numeric_conflict, weak=weak, candidate_score=s.candidate_score)
 
 
 class MatchLadder:

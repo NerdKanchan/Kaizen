@@ -33,6 +33,17 @@ def test_extra_trailing_word_still_scores_high():
     assert sim("STATLOCK STABILIZATION DEVICE", "StatLock™ Stabilization Device Adult").score >= 0.85
 
 
+def test_token_set_does_not_hide_omitted_attributes():
+    assert sim("NEEDLE, 0.5MM", "Needle, Safety Hypodermic, 25 G (0.5 mm OD x 16 mm Length)").score < 0.85
+    assert sim("DRAPE, ABSORBENT, 24IN X 24IN", "Drape, Absorbent").score < 0.85
+    assert sim("SYRINGE, LUER LOCK, 5ML", "Syringe, 5 mL").score < 0.85
+    assert sim("FUNNEL STYLET", "PICC assembly with Stylet and Stylet Funnel").score < 0.85
+
+
+def test_composite_detail_reports_coverage():
+    assert "token_coverage=" in sim("NEEDLE", "Needle Safety Hypodermic").detail
+
+
 def test_single_generic_token_does_not_score_high():
     assert sim("TAPE", "Surgical Tape").score < 0.85
 
