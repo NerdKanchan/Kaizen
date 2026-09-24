@@ -170,6 +170,121 @@
       "active": true,
       "notes": "Main product line: the label spells out the full configuration, the BOM and drawing abbreviate it. Anchored to item 3330010.",
       "version": 1
+    },
+    {
+      "id": "REL-010",
+      "canonical": "SENSOR HOLDER BAG, TLS III",
+      "aliases": [
+        "Sherlock TM Sensor Holder",
+        "Sherlock Sensor Holder"
+      ],
+      "scope": "global",
+      "doc_types": [],
+      "item_anchors": [
+        "SA0720320"
+      ],
+      "provenance": "manual",
+      "created_by": "kaizen",
+      "created_at": "2026-09-24T00:00:00Z",
+      "updated_at": "2026-09-24T00:00:00Z",
+      "active": true,
+      "notes": "Approved equivalence for the BOM item; anchored because sensor-holder wording is product-specific.",
+      "version": 1
+    },
+    {
+      "id": "REL-011",
+      "canonical": "BAND POLYISOPRENE, BLUE",
+      "aliases": [
+        "Blue Elastic Band"
+      ],
+      "scope": "global",
+      "doc_types": [],
+      "item_anchors": [
+        "RM5000361"
+      ],
+      "provenance": "manual",
+      "created_by": "kaizen",
+      "created_at": "2026-09-24T00:00:00Z",
+      "updated_at": "2026-09-24T00:00:00Z",
+      "active": true,
+      "notes": "Approved equivalence for the BOM item; material and color are retained in the BOM term.",
+      "version": 1
+    },
+    {
+      "id": "REL-012",
+      "canonical": "TOURNIQUETE FREE LATEX",
+      "aliases": [
+        "Tourniquet"
+      ],
+      "scope": "global",
+      "doc_types": [],
+      "item_anchors": [
+        "RM5000507"
+      ],
+      "provenance": "manual",
+      "created_by": "kaizen",
+      "created_at": "2026-09-24T00:00:00Z",
+      "updated_at": "2026-09-24T00:00:00Z",
+      "active": true,
+      "notes": "Approved spelling and product-label shortening for the BOM item.",
+      "version": 1
+    },
+    {
+      "id": "REL-013",
+      "canonical": "DISPOSABLE SAFETY",
+      "aliases": [
+        "Safety Scalpel"
+      ],
+      "scope": "global",
+      "doc_types": [],
+      "item_anchors": [
+        "RM5005501"
+      ],
+      "provenance": "manual",
+      "created_by": "kaizen",
+      "created_at": "2026-09-24T00:00:00Z",
+      "updated_at": "2026-09-24T00:00:00Z",
+      "active": true,
+      "notes": "Reviewer-approved equivalence for the anchored BOM item only; do not generalize DISPOSABLE SAFETY globally.",
+      "version": 1
+    },
+    {
+      "id": "REL-014",
+      "canonical": "STYLET TLS/ECG N52 ASSY",
+      "aliases": [
+        "ECG Leads Assembly"
+      ],
+      "scope": "global",
+      "doc_types": [],
+      "item_anchors": [
+        "SA0753169"
+      ],
+      "provenance": "manual",
+      "created_by": "kaizen",
+      "created_at": "2026-09-24T00:00:00Z",
+      "updated_at": "2026-09-24T00:00:00Z",
+      "active": true,
+      "notes": "Approved label abbreviation for the anchored TLS/ECG stylet assembly.",
+      "version": 1
+    },
+    {
+      "id": "REL-015",
+      "canonical": "WIPES, ALCOHOL PREP, POUCHED",
+      "aliases": [
+        "Wipe, 70% Isopropyl Alcohol"
+      ],
+      "scope": "global",
+      "doc_types": [],
+      "item_anchors": [
+        "RM0717794"
+      ],
+      "provenance": "manual",
+      "created_by": "kaizen",
+      "created_at": "2026-09-24T00:00:00Z",
+      "updated_at": "2026-09-24T00:00:00Z",
+      "active": true,
+      "notes": "Approved label wording for the anchored alcohol-prep wipe BOM item.",
+      "version": 1
     }
   ]
 }

@@ -2,11 +2,29 @@
 OCR runs only when a page has no extractable text and only if an engine is installed (`pip install
 rapidocr-onnxruntime`, fully offline). Results carry per-word confidence and are marked extraction_method='ocr'."""
 
+import re
 from dataclasses import dataclass, field
 
 import pymupdf
 
 from kaizen.ingest.pdf_words import Word
+
+
+_OCR_CORRECTIONS = (
+    (re.compile(r"\bstatlockr['’·\s]*", re.IGNORECASE), "StatLock "),
+    (re.compile(r"\bchloraprepm\b", re.IGNORECASE), "ChloraPrep"),
+    (re.compile(r"\bchlorapreptl\.i\b", re.IGNORECASE), "ChloraPrepTM"),
+    (re.compile(r"\bflexuram\b", re.IGNORECASE), "FlexuraTM"),
+    (re.compile(r"\blsopropyl\b", re.IGNORECASE), "Isopropyl"),
+    (re.compile(r"\bv1ith\b", re.IGNORECASE), "with"),
+    (re.compile(r"\bstyle[!]l?(?=\s|$)", re.IGNORECASE), "Stylet"),
+)
+
+
+def correct_ocr_text(text: str) -> str:
+    for pattern, replacement in _OCR_CORRECTIONS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 @dataclass

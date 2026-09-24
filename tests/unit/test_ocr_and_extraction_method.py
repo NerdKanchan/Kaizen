@@ -1,10 +1,27 @@
 """Extraction method and confidence are recorded; OCR is attempted only when needed and only if available."""
 
 import pymupdf
+import pytest
 
 from kaizen.datasets.pdf_label import LabelSpec, render_label_pdf
 from kaizen.ingest.label_pdf import parse_label_pdf
-from kaizen.ingest.ocr import OcrResult, ocr_available
+from kaizen.ingest.ocr import OcrResult, correct_ocr_text, ocr_available
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Statlockr'·' Stabilization Device", "StatLock Stabilization Device"),
+        ("ChloraPrepm Solution", "ChloraPrep Solution"),
+        ("ChloraPrepTl.I Solution", "ChloraPrepTM Solution"),
+        ("Flexuram Guidewire", "FlexuraTM Guidewire"),
+        ("70% lsopropyl Alcohol", "70% Isopropyl Alcohol"),
+        ("V1ith Sherlock", "with Sherlock"),
+        ("Style! Funnel", "Stylet Funnel"),
+    ],
+)
+def test_correct_ocr_text(raw, expected):
+    assert correct_ocr_text(raw) == expected
 
 
 def test_text_pdf_records_pdf_text_method(tmp_path):
