@@ -14,10 +14,22 @@ _OCR_CORRECTIONS = (
     (re.compile(r"\bstatlockr['’·\s]*", re.IGNORECASE), "StatLock "),
     (re.compile(r"\bchloraprepm\b", re.IGNORECASE), "ChloraPrep"),
     (re.compile(r"\bchlorapreptl\.i\b", re.IGNORECASE), "ChloraPrepTM"),
+    (re.compile(r"\b3CGTl\.I\b", re.IGNORECASE), "3CGTM"),
     (re.compile(r"\bflexuram\b", re.IGNORECASE), "FlexuraTM"),
     (re.compile(r"\blsopropyl\b", re.IGNORECASE), "Isopropyl"),
     (re.compile(r"\bv1ith\b", re.IGNORECASE), "with"),
     (re.compile(r"\bstyle[!]l?(?=\s|$)", re.IGNORECASE), "Stylet"),
+    (re.compile(r"\bStylet[!]T\b", re.IGNORECASE), "Stylet/T"),
+    (re.compile(r"\bSherlockTM(?=[A-Z])", re.IGNORECASE), "Sherlock TM "),
+    (re.compile(r"(?<=Sensor)(?=Holder)", re.IGNORECASE), " "),
+    (re.compile(r"\bBlueElastic(?=\s|[A-Z])", re.IGNORECASE), "Blue Elastic"),
+    (re.compile(r"\bECGLeads(?=\s|[A-Z])", re.IGNORECASE), "ECG Leads"),
+    (re.compile(r"(?<=Leads)(?=Assembly)", re.IGNORECASE), " "),
+    (re.compile(r"\bWipe(?=\d)", re.IGNORECASE), "Wipe "),
+    (re.compile(r"(\d%?)(?=Isopropyl)", re.IGNORECASE), r"\1 "),
+    (re.compile(r"(?<=Isopropyl)(?=Alcohol)", re.IGNORECASE), " "),
+    (re.compile(r"(?<=\d)(?=Isopropyl)", re.IGNORECASE), " "),
+    (re.compile(r"(?<=pouch)(?=\d|Each)", re.IGNORECASE), " "),
 )
 
 
