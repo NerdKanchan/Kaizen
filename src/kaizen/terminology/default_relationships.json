@@ -252,7 +252,7 @@
       "id": "REL-014",
       "canonical": "STYLET TLS/ECG N52 ASSY",
       "aliases": [
-        "ECG Leads Assembly"
+        "STYLET TLS ECG N52 ASSEMBLY"
       ],
       "scope": "global",
       "doc_types": [],
@@ -265,6 +265,25 @@
       "updated_at": "2026-09-24T00:00:00Z",
       "active": true,
       "notes": "Approved label abbreviation for the anchored TLS/ECG stylet assembly.",
+      "version": 1
+    },
+    {
+      "id": "REL-016",
+      "canonical": "ASSEMBLY, ECG LEADS (GEN)",
+      "aliases": [
+        "ECG Leads Assembly"
+      ],
+      "scope": "global",
+      "doc_types": [],
+      "item_anchors": [
+        "RM5005793"
+      ],
+      "provenance": "manual",
+      "created_by": "kaizen",
+      "created_at": "2026-09-24T00:00:00Z",
+      "updated_at": "2026-09-24T00:00:00Z",
+      "active": true,
+      "notes": "ECG Leads Assembly is anchored to the dedicated ECG leads BOM item, not the separate TLS/ECG stylet assembly.",
       "version": 1
     },
     {
