@@ -71,6 +71,12 @@ On Windows PowerShell, use:
 .\.venv\Scripts\kaizen.exe run <folder> --out out/myrun
 .\.venv\Scripts\kaizen.exe serve
 ```
+
+On Windows PowerShell, use:
+```powershell
+.\.venv\Scripts\kaizen.exe run <folder> --out out/myrun
+.\.venv\Scripts\kaizen.exe serve
+```
 Outputs: `run.json` (documents, items, evidence, results, audit), `report.xlsx`. Reviewer decisions,
 terminology and action items live in the workspace database (`./kaizen-workspace/kaizen.db`; change with
 `--workspace` or `KAIZEN_WORKSPACE`).
