@@ -1,16 +1,48 @@
 """Extraction method and confidence are recorded; OCR is attempted only when needed and only if available."""
 
 import pymupdf
+import pytest
 
 from kaizen.datasets.pdf_label import LabelSpec, render_label_pdf
 from kaizen.ingest.label_pdf import parse_label_pdf
-from kaizen.ingest.ocr import OcrResult, ocr_available
+from kaizen.ingest.ocr import OcrResult, correct_ocr_text, ocr_available
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Statlockr'·' Stabilization Device", "StatLock Stabilization Device"),
+        ("ChloraPrepm Solution", "ChloraPrep Solution"),
+        ("ChloraPrepTl.I Solution", "ChloraPrepTM Solution"),
+        ("Flexuram Guidewire", "FlexuraTM Guidewire"),
+        ("70% lsopropyl Alcohol", "70% Isopropyl Alcohol"),
+        ("V1ith Sherlock", "with Sherlock"),
+        ("Style! Funnel", "Stylet Funnel"),
+        ("SherlockTMSensorHolder", "Sherlock TM Sensor Holder"),
+        ("BlueElastic Band", "Blue Elastic Band"),
+        ("ECGLeadsAssembly", "ECG Leads Assembly"),
+        ("Wipe70%IsopropylAlcohol", "Wipe 70% Isopropyl Alcohol"),
+        ("AspirationDevice", "Aspiration Device"),
+        ("MicroEZTMMicrointroducer", "MicroEZTM Microintroducer"),
+        ("GAUZE 10CMX10CM", "GAUZE 10 CM X 10 CM"),
+        ("GAUZE 5CM X5CM", "GAUZE 5 CM X 5 CM"),
+        ("Sherlock3CGTMSensor", "Sherlock3CGTM Sensor"),
+    ],
+)
+def test_correct_ocr_text(raw, expected):
+    assert correct_ocr_text(raw) == expected
 
 
 def test_text_pdf_records_pdf_text_method(tmp_path):
     doc = parse_label_pdf(render_label_pdf(LabelSpec(ref="1295108", product_name="Kit", contents=["1 Each - Towel, Absorbent"]), tmp_path / "l.pdf"))
     assert doc.items[0].evidence.extraction_method == "pdf_text"
     assert doc.header["extraction_method"] == "pdf_text"
+
+
+def test_native_pdf_text_is_not_rewritten_as_ocr(tmp_path):
+    doc = parse_label_pdf(render_label_pdf(LabelSpec(ref="1295108", product_name="Kit", contents=["1 Each - ChloraPrepm Solution"]), tmp_path / "l.pdf"))
+    assert doc.items[0].description == "ChloraPrepm Solution"
+    assert doc.items[0].attributes["ocr_corrected_line"] is None
 
 
 def test_image_only_pdf_is_detected_and_reported_honestly(tmp_path, monkeypatch):

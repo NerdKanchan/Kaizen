@@ -25,6 +25,7 @@ class CheckResult(BaseModel):
     classification: Classification
     match_level: MatchLevel
     score: float | None = Field(default=None, ge=0.0, le=1.0)
+    candidate_score: float | None = Field(default=None, ge=0.0, le=1.0)
     relationship_id: str | None = None
     explanation: str
     discrepancies: list[Discrepancy] = Field(default_factory=list)

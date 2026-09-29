@@ -35,17 +35,34 @@ PCOs and label revisions, with the reviewer as the final decision-maker. Built f
 - Works fully offline. An AI provider can be enabled explicitly; its output is labelled as a suggestion and
   never changes a classification, decision or relationship.
 
-## Install (clean checkout)
+## Install (macOS / Linux)
 ```bash
 python3.13 -m venv .venv                 # Python 3.12+ works
 .venv/bin/pip install -e ".[dev]"        # engine + API + test tools
 cd ui && npm install && npm run build && cd ..   # reviewer UI (optional; API works without it)
 ```
 
+## Install (Windows PowerShell)
+
+Install Python 3.12+ and Node.js 20+ first, then run from a clean checkout:
+```powershell
+py -3.13 -m venv .venv                    # use py -3.12 if that is your installed version
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"         # engine + API + test tools
+Push-Location ui; npm install; npm run build; Pop-Location   # reviewer UI (optional; API works without it)
+```
+If PowerShell prevents activation, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` for the current session, then activate again.
+
 ## Run
 ```bash
 .venv/bin/kaizen run <folder> --out out/myrun   # one SKU set per sub-folder (bom.*, label.pdf, label_old.pdf, drawing.pdf) plus pco/*.xlsx|pdf
 .venv/bin/kaizen serve                          # local API + UI at http://127.0.0.1:8765 (sign up with your BD email, then sign in and pick a slot)
+```
+
+On Windows PowerShell, use:
+```powershell
+.\.venv\Scripts\kaizen.exe run <folder> --out out/myrun
+.\.venv\Scripts\kaizen.exe serve
 ```
 Outputs: `run.json` (documents, items, evidence, results, audit), `report.xlsx`. Reviewer decisions,
 terminology and action items live in the workspace database (`./kaizen-workspace/kaizen.db`; change with
@@ -149,7 +166,18 @@ export KAIZEN_AI_PROVIDER=anthropic ANTHROPIC_API_KEY=...   # optional: KAIZEN_A
 Only the two descriptions and the SKU/item number are sent. Every suggestion is labelled "AI SUGGESTION",
 recorded with provider, model, prompt version and timestamp in the run, and never pairs items on its own.
 Semantic matching (L4) accepts any local embedding function (`kaizen.matching.semantic.SemanticMatcher`).
-OCR uses `rapidocr-onnxruntime` when installed (offline).
+
+## Optional OCR configuration
+Off by default; image-only label pages are reported and skipped without it. To enable the offline OCR
+fallback for scanned/image-only labels:
+```bash
+.venv/bin/pip install rapidocr-onnxruntime
+```
+No other configuration is needed — `kaizen.ingest.ocr.ocr_available()` detects the package at runtime and
+`label_pdf` parsing uses it automatically for pages with no extractable text. Results are marked
+`extraction_method="ocr"` with per-word confidence and a warning naming the engine and DPI used. OCR is
+wired for labels only; scanned BOM prints and drawings are still reported as skipped, not read (see
+`docs/known-limitations.md`).
 
 ## Documents
 `docs/solution-overview.md` (plain-language overview for presenting), `docs/system-description.md` (what was built, module by module),

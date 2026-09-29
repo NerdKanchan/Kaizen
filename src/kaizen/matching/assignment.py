@@ -37,7 +37,7 @@ class Assignment:
 
 
 def _rank(c: Candidate) -> tuple[int, float]:
-    return (LEVEL_RANK[c.outcome.level], c.outcome.score)
+    return (LEVEL_RANK[c.outcome.level], c.outcome.candidate_score if c.outcome.candidate_score is not None else c.outcome.score)
 
 
 def assign(
@@ -55,7 +55,10 @@ def assign(
             if out.matched:
                 candidates.append(Candidate(i, j, out))
     assignable = [c for c in candidates if c.outcome.assignable]
-    order = sorted(assignable, key=lambda c: (-LEVEL_RANK[c.outcome.level], -c.outcome.score, c.a_index, c.b_index))
+    # Candidate score controls eligibility and deterministic assignment.  The
+    # conservative outcome score is for reviewer-facing confidence, not a
+    # second assignment policy that can reshuffle equally eligible candidates.
+    order = sorted(assignable, key=lambda c: (-_rank(c)[0], -_rank(c)[1], c.a_index, c.b_index))
     taken_a: dict[int, Candidate] = {}
     taken_b: dict[int, Candidate] = {}
     for c in order:
@@ -76,7 +79,7 @@ def assign(
             if c.a_index == p.a_index
             and c.b_index != p.b_index
             and LEVEL_RANK[c.outcome.level] == LEVEL_RANK[p.outcome.level]
-            and c.outcome.score >= p.outcome.score - delta
+            and (c.outcome.candidate_score if c.outcome.candidate_score is not None else c.outcome.score) >= (p.outcome.candidate_score if p.outcome.candidate_score is not None else p.outcome.score) - delta
         ]
         if alts:
             ambiguous[p.a_index] = alts

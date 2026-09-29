@@ -2,11 +2,46 @@
 OCR runs only when a page has no extractable text and only if an engine is installed (`pip install
 rapidocr-onnxruntime`, fully offline). Results carry per-word confidence and are marked extraction_method='ocr'."""
 
+import re
 from dataclasses import dataclass, field
 
 import pymupdf
 
 from kaizen.ingest.pdf_words import Word
+
+_OCR_CORRECTIONS = (
+    (re.compile(r"\bstatlockr['’·\s]*", re.IGNORECASE), "StatLock "),
+    (re.compile(r"\bchloraprepm\b", re.IGNORECASE), "ChloraPrep"),
+    (re.compile(r"\bchlorapreptl\.i\b", re.IGNORECASE), "ChloraPrepTM"),
+    (re.compile(r"\b3CGTl\.I\b", re.IGNORECASE), "3CGTM"),
+    (re.compile(r"\bflexuram\b", re.IGNORECASE), "FlexuraTM"),
+    (re.compile(r"\blsopropyl\b", re.IGNORECASE), "Isopropyl"),
+    (re.compile(r"\bv1ith\b", re.IGNORECASE), "with"),
+    (re.compile(r"\bstyle[!]l?(?=\s|$)", re.IGNORECASE), "Stylet"),
+    (re.compile(r"\bStylet[!]T\b", re.IGNORECASE), "Stylet/T"),
+    (re.compile(r"\bSherlockTM(?=[A-Z])", re.IGNORECASE), "Sherlock TM "),
+    (re.compile(r"(?<=Sensor)(?=Holder)", re.IGNORECASE), " "),
+    (re.compile(r"\bBlueElastic(?=\s|[A-Z])", re.IGNORECASE), "Blue Elastic"),
+    (re.compile(r"\bECGLeads(?=\s|[A-Z])", re.IGNORECASE), "ECG Leads"),
+    (re.compile(r"(?<=Leads)(?=Assembly)", re.IGNORECASE), " "),
+    (re.compile(r"\bWipe(?=\d)", re.IGNORECASE), "Wipe "),
+    (re.compile(r"(\d%?)(?=Isopropyl)", re.IGNORECASE), r"\1 "),
+    (re.compile(r"(?<=Isopropyl)(?=Alcohol)", re.IGNORECASE), " "),
+    (re.compile(r"(?<=\d)(?=Isopropyl)", re.IGNORECASE), " "),
+    (re.compile(r"(?<=pouch)(?=\d|Each)", re.IGNORECASE), " "),
+    (re.compile(r"\bAspirationDevice\b", re.IGNORECASE), "Aspiration Device"),
+    (re.compile(r"\bMicroEZTMMicrointroducer\b", re.IGNORECASE), "MicroEZTM Microintroducer"),
+    (re.compile(r"(\d+(?:\.\d+)?)(CM)(?=X|\d)", re.IGNORECASE), r"\1\2 "),
+    (re.compile(r"(?<=\d)(?=CM\b)", re.IGNORECASE), " "),
+    (re.compile(r"(?<=X)(?=\d)", re.IGNORECASE), " "),
+    (re.compile(r"3CGTM(?=[A-Z])", re.IGNORECASE), "3CGTM "),
+)
+
+
+def correct_ocr_text(text: str) -> str:
+    for pattern, replacement in _OCR_CORRECTIONS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 @dataclass
@@ -52,7 +87,7 @@ def ocr_page(page: pymupdf.Page, dpi: int = 200) -> OcrResult:
 
 
 def ocr_words(result: OcrResult) -> list[Word]:
-    return [Word(text=t, x0=x0, y0=y0, x1=x1, y1=y1, block=0, line=i, word_no=0) for i, (x0, y0, x1, y1, t, _) in enumerate(result.words)]
+    return [Word(text=t, x0=x0, y0=y0, x1=x1, y1=y1, block=0, line=i, word_no=0, confidence=c) for i, (x0, y0, x1, y1, t, c) in enumerate(result.words)]
 
 
 def ocr_min_confidence(result: OcrResult) -> float:

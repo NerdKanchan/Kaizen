@@ -1,11 +1,15 @@
 """Performance harness: synthetic N-SKU datasets and timed phases (ingest / matching / report)."""
 
 import json
-import resource
 import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+try:
+    import resource  # Unix-only; unavailable on Windows
+except ImportError:
+    resource = None
 
 from kaizen.datasets.build import _bom_rows, _drawing_spec
 from kaizen.datasets.drawing_docs import render_drawing_pdf
@@ -52,6 +56,8 @@ def build_perf_dataset(root: Path | str, skus: int) -> Path:
 
 
 def _peak_mb() -> float | None:
+    if resource is None:
+        return None
     try:
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         return round(rss / (1024 * 1024) if sys.platform == "darwin" else rss / 1024, 1)

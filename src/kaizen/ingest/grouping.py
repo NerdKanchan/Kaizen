@@ -21,6 +21,11 @@ def family_of(code: str | None) -> str:
     return m.group(1) if m else code.strip()
 
 
+def identity_key(code: str | None) -> str:
+    """Return the stable numeric product identity shared by BOM parents and label REFs."""
+    return family_of(code)
+
+
 def group_by_sku(documents: list[Document]) -> list[SkuGroup]:
     documents = [d for d in documents if d.doc_type is not DocType.PCO]  # a PCO spans many SKUs; handled batch-wide
     folder_docs: dict[Path, int] = defaultdict(int)

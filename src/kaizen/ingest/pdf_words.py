@@ -17,6 +17,7 @@ class Word:
     block: int
     line: int
     word_no: int
+    confidence: float = 1.0
 
     @property
     def cx(self) -> float:
