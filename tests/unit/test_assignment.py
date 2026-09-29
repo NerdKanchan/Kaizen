@@ -51,6 +51,17 @@ def test_ambiguous_when_top_two_candidates_are_within_delta():
     assert len(alts) == 1 and alts[0].b_index != res.pairs[0].b_index
 
 
+def test_assignment_uses_candidate_score_not_conservative_display_score():
+    res = run(
+        ["NEEDLE 21G"],
+        [
+            "Needle, Introducer, 21 G (0.9 mm OD x 0.55 mm ID x 70 mm Length)",
+            "Needle, Safety Hypodermic, 21 G (0.8 mm OD x 40 mm Length)",
+        ],
+    )
+    assert res.pairs[0].b_index == 0
+
+
 def test_unmatched_item_whose_best_candidate_was_taken_is_ambiguous():
     res = run(["NEEDLE INTRODUCER 21G", "NEEDLE 21G"], ["Needle, Introducer, 21 G"])
     assert len(res.pairs) == 1 and res.pairs[0].a_index == 0

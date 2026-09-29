@@ -55,7 +55,10 @@ def assign(
             if out.matched:
                 candidates.append(Candidate(i, j, out))
     assignable = [c for c in candidates if c.outcome.assignable]
-    order = sorted(assignable, key=lambda c: (-LEVEL_RANK[c.outcome.level], -c.outcome.score, c.a_index, c.b_index))
+    # Candidate score controls eligibility and deterministic assignment.  The
+    # conservative outcome score is for reviewer-facing confidence, not a
+    # second assignment policy that can reshuffle equally eligible candidates.
+    order = sorted(assignable, key=lambda c: (-_rank(c)[0], -_rank(c)[1], c.a_index, c.b_index))
     taken_a: dict[int, Candidate] = {}
     taken_b: dict[int, Candidate] = {}
     for c in order:

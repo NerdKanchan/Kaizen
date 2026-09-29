@@ -9,7 +9,6 @@ import pymupdf
 
 from kaizen.ingest.pdf_words import Word
 
-
 _OCR_CORRECTIONS = (
     (re.compile(r"\bstatlockr['’·\s]*", re.IGNORECASE), "StatLock "),
     (re.compile(r"\bchloraprepm\b", re.IGNORECASE), "ChloraPrep"),
