@@ -40,7 +40,7 @@ class BusinessCase:
     reviewers: int
     assumptions: list[str] = field(default_factory=list)
     per_sku: dict[str, dict[str, float]] = field(default_factory=dict)
-    # projection: strong fuzzy pairings (no discrepancy, score ≥ 0.95) that a reviewer typically confirms once
+    # projection: strong fuzzy pairings (no discrepancy, candidate score ≥ 0.95) that a reviewer typically confirms once
     # and saves as relationships; after that the next run auto-clears them
     confirmable_rows: int = 0
     needs_validation_after_confirmation: int = 0
@@ -92,7 +92,7 @@ def business_case(run: Run, a: BusinessAssumptions = BusinessAssumptions(), timi
         return round(est_, 2), round(saved_, 2), reduction_, hours_, round(hours_ * a.hourly_rate * a.projects_per_year, 2)
 
     est, saved, reduction, hours_project, annual = estimate(needs, cleared)
-    confirmable = sum(1 for r in rev if r.requires_validation and r.classification.value == "POTENTIAL" and not r.discrepancies and (r.score or 0) >= 0.95)
+    confirmable = sum(1 for r in rev if r.requires_validation and r.classification.value == "POTENTIAL" and not r.discrepancies and (r.candidate_score if r.candidate_score is not None else r.score or 0) >= 0.95)
     est2, _, reduction2, hours2, annual2 = estimate(needs - confirmable, cleared + confirmable)
     assumptions = [
         f"Baseline {a.baseline_minutes_per_sku:g} minutes per SKU per reviewer, {a.reviewers} reviewers (brief).",
@@ -102,6 +102,6 @@ def business_case(run: Run, a: BusinessAssumptions = BusinessAssumptions(), timi
         f"{a.minutes_per_cleared_row:g} minutes per auto-cleared row (skim).",
         f"Project = {a.skus_per_project} SKUs; {a.projects_per_year} projects per year; ${a.hourly_rate:g}/hour (brief).",
         "Rows and validation counts come from this run; nothing is assumed about accuracy.",
-        f"Projection (not a measurement): {confirmable} POTENTIAL rows are strong pairings (score ≥ 0.95, no discrepancy); once a reviewer confirms them as relationships the next run auto-clears them.",
+        f"Projection (not a measurement): {confirmable} POTENTIAL rows are strong pairings (candidate score ≥ 0.95, no discrepancy); once a reviewer confirms them as relationships the next run auto-clears them.",
     ]
     return BusinessCase(skus, rows, cleared, needs, est, saved, reduction, hours_project, annual, reduction >= a.target_reduction_pct, a.baseline_minutes_per_sku, a.hourly_rate, a.skus_per_project, a.projects_per_year, a.reviewers, assumptions, per_sku, confirmable, needs - confirmable, est2, reduction2, hours2, annual2, reduction2 >= a.target_reduction_pct, basis, timing.samples if timing else 0, measured, per_row)

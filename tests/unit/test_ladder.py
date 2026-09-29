@@ -33,7 +33,7 @@ def test_relationship_level_carries_id():
 def test_fuzzy_above_threshold_is_potential_with_score_and_threshold_in_reason():
     out = ladder().match("CHLORAPREP APPLICATOR 3ML", "ChloraPrep™ Solution One-Step Applicator, 3 mL")
     assert out.level is MatchLevel.FUZZY
-    assert out.score >= 0.85
+    assert out.score < 0.85 and out.candidate_score >= 0.85
     assert out.weak is False
     assert "POTENTIAL" in out.reason and "0.85" in out.reason and "token" in out.reason
 

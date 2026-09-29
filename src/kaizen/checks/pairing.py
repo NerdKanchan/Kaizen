@@ -147,7 +147,7 @@ def _pair_row(a, b, p: Candidate, alternatives: list[Candidate], b_items, policy
     requires = classification in (Classification.POTENTIAL, Classification.MISMATCH, Classification.MISSING) or bool(discrepancies)
     return CheckResult(
         row_id=ids.next(), sku=sku, check=policy.check_type, source_a=a, source_b=b, normalized_a=norm_a.normalized, normalized_b=norm_b.normalized,
-        classification=classification, match_level=out.level, score=out.score, relationship_id=out.relationship_id,
+        classification=classification, match_level=out.level, score=out.score, candidate_score=out.candidate_score, relationship_id=out.relationship_id,
         explanation=f"{merge_note(a)}{out.reason}{qty_text}", discrepancies=discrepancies, requires_validation=requires,
     )
 

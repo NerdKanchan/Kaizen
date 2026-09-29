@@ -27,7 +27,8 @@ def label_only(results):
 # --- similar vs equivalent -------------------------------------------------------------------------------
 def test_full_token_containment_is_potential_not_equivalent():
     r = rows(run(bom_doc([("4440003", "CHLORAPREP APPLICATOR 3ML", "1")]), label_doc([("ChloraPrep™ Solution One-Step Applicator, 3 mL", "1")])))["4440003"]
-    assert r.classification is Classification.POTENTIAL and r.score == 1.0
+    assert r.classification is Classification.POTENTIAL
+    assert r.score < 0.85 and r.candidate_score == 1.0
     assert r.requires_validation is True
 
 
