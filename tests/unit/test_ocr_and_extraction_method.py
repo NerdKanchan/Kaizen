@@ -39,6 +39,12 @@ def test_text_pdf_records_pdf_text_method(tmp_path):
     assert doc.header["extraction_method"] == "pdf_text"
 
 
+def test_native_pdf_text_is_not_rewritten_as_ocr(tmp_path):
+    doc = parse_label_pdf(render_label_pdf(LabelSpec(ref="1295108", product_name="Kit", contents=["1 Each - ChloraPrepm Solution"]), tmp_path / "l.pdf"))
+    assert doc.items[0].description == "ChloraPrepm Solution"
+    assert doc.items[0].attributes["ocr_corrected_line"] is None
+
+
 def test_image_only_pdf_is_detected_and_reported_honestly(tmp_path, monkeypatch):
     src = render_label_pdf(LabelSpec(ref="1295108", product_name="Kit", contents=["1 Each - Towel, Absorbent", "2 Each - Mask"]), tmp_path / "l.pdf")
     pix = pymupdf.open(src)[0].get_pixmap(dpi=120)
