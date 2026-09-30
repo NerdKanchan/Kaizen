@@ -1,45 +1,53 @@
 """OCR fallback for image-only pages. Priority is native PDF text → layout extraction → OCR → (optional) AI vision.
 OCR runs only when a page has no extractable text and only if an engine is installed (`pip install
-rapidocr-onnxruntime`, fully offline). Results carry per-word confidence and are marked extraction_method='ocr'."""
+rapidocr-onnxruntime`, fully offline). Results carry per-word confidence and are marked extraction_method='ocr'.
 
+Product-name OCR corrections are loaded from ``ocr_corrections.json`` (same directory) so they can be
+edited without touching source code.  Structural spacing rules (digit/CM/X spacing) are kept in code."""
+
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pymupdf
 
 from kaizen.ingest.pdf_words import Word
 
-_OCR_CORRECTIONS = (
-    (re.compile(r"\bstatlockr['’·\s]*", re.IGNORECASE), "StatLock "),
-    (re.compile(r"\bchloraprepm\b", re.IGNORECASE), "ChloraPrep"),
-    (re.compile(r"\bchlorapreptl\.i\b", re.IGNORECASE), "ChloraPrepTM"),
-    (re.compile(r"\b3CGTl\.I\b", re.IGNORECASE), "3CGTM"),
-    (re.compile(r"\bflexuram\b", re.IGNORECASE), "FlexuraTM"),
-    (re.compile(r"\blsopropyl\b", re.IGNORECASE), "Isopropyl"),
-    (re.compile(r"\bv1ith\b", re.IGNORECASE), "with"),
-    (re.compile(r"\bstyle[!]l?(?=\s|$)", re.IGNORECASE), "Stylet"),
-    (re.compile(r"\bStylet[!]T\b", re.IGNORECASE), "Stylet/T"),
-    (re.compile(r"\bSherlockTM(?=[A-Z])", re.IGNORECASE), "Sherlock TM "),
-    (re.compile(r"(?<=Sensor)(?=Holder)", re.IGNORECASE), " "),
-    (re.compile(r"\bBlueElastic(?=\s|[A-Z])", re.IGNORECASE), "Blue Elastic"),
-    (re.compile(r"\bECGLeads(?=\s|[A-Z])", re.IGNORECASE), "ECG Leads"),
-    (re.compile(r"(?<=Leads)(?=Assembly)", re.IGNORECASE), " "),
-    (re.compile(r"\bWipe(?=\d)", re.IGNORECASE), "Wipe "),
+# ---------------------------------------------------------------------------
+# Product-name corrections — loaded from the adjacent JSON file so that new
+# brand-name OCR glitches can be added without changing Python source.
+# ---------------------------------------------------------------------------
+_CORRECTIONS_FILE = Path(__file__).with_name("ocr_corrections.json")
+
+
+def _load_product_corrections(path: Path = _CORRECTIONS_FILE) -> tuple[tuple[re.Pattern, str], ...]:
+    """Read [pattern, replacement] pairs from *path* and compile them."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return tuple((re.compile(entry[0], re.IGNORECASE), entry[1]) for entry in data["corrections"])
+
+
+_PRODUCT_CORRECTIONS: tuple[tuple[re.Pattern, str], ...] = _load_product_corrections()
+
+# ---------------------------------------------------------------------------
+# Structural spacing rules — regex mechanics, not brand-name lists.
+# These fix systematic OCR joining artefacts (digit–unit, dimension notation).
+# ---------------------------------------------------------------------------
+_STRUCTURAL_CORRECTIONS: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"(\d%?)(?=Isopropyl)", re.IGNORECASE), r"\1 "),
     (re.compile(r"(?<=Isopropyl)(?=Alcohol)", re.IGNORECASE), " "),
     (re.compile(r"(?<=\d)(?=Isopropyl)", re.IGNORECASE), " "),
     (re.compile(r"(?<=pouch)(?=\d|Each)", re.IGNORECASE), " "),
-    (re.compile(r"\bAspirationDevice\b", re.IGNORECASE), "Aspiration Device"),
-    (re.compile(r"\bMicroEZTMMicrointroducer\b", re.IGNORECASE), "MicroEZTM Microintroducer"),
     (re.compile(r"(\d+(?:\.\d+)?)(CM)(?=X|\d)", re.IGNORECASE), r"\1\2 "),
     (re.compile(r"(?<=\d)(?=CM\b)", re.IGNORECASE), " "),
     (re.compile(r"(?<=X)(?=\d)", re.IGNORECASE), " "),
-    (re.compile(r"3CGTM(?=[A-Z])", re.IGNORECASE), "3CGTM "),
 )
 
 
 def correct_ocr_text(text: str) -> str:
-    for pattern, replacement in _OCR_CORRECTIONS:
+    for pattern, replacement in _PRODUCT_CORRECTIONS:
+        text = pattern.sub(replacement, text)
+    for pattern, replacement in _STRUCTURAL_CORRECTIONS:
         text = pattern.sub(replacement, text)
     return text
 
