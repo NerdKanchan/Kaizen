@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 out/
+output/
 build/
 dist/
 .DS_Store
@@ -15,4 +16,5 @@ docs/reference/*.pdf
 # Third-party agent skills installed with `npx skills add` (not part of the product)
 .claude/skills/
 .claude/launch.json
+.claude/settings.json
 .playwright-mcp/
