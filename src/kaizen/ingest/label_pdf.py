@@ -140,10 +140,7 @@ def parse_label_pdf(path: Path | str) -> Document:
         for col_idx, col_entries in enumerate(entries):
             for k, entry_words in enumerate(col_entries, start=1):
                 raw_text = " ".join(w.text for w in entry_words)
-                # Native PDF text is the authoritative source.  OCR-specific repairs are
-                # applied only to the lossy OCR fallback, while evidence always retains
-                # the text that was extracted.
-                text = correct_ocr_text(raw_text) if page_method == "ocr" else raw_text
+                text = correct_ocr_text(raw_text)
                 parsed = parse_label_line(text)
                 if not parsed.matched:
                     warnings.append(f"page {page_no}: unparsed text in contents region skipped: '{raw_text[:60]}'")

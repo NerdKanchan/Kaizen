@@ -6,6 +6,7 @@ from kaizen.datasets.pdf_label import LabelSpec, render_label_pdf
 from kaizen.ingest.grouping import identity_key
 from kaizen.models import Classification, Thresholds
 from kaizen.pipeline import discover_files, load_run, run_folder, save_run
+from kaizen.ingest.grouping import identity_key
 from kaizen.terminology.store import RelationshipStore
 
 
