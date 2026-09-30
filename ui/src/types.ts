@@ -13,6 +13,7 @@ export type DocType = "BOM" | "LABEL" | "DRAWING" | "PCO";
 export const DOC_TYPES: DocType[] = ["BOM", "LABEL", "DRAWING", "PCO"];
 
 export type ReviewState =
+  | "REVIEWED"
   | "ENGINE_RECOMMENDED"
   | "REVIEWER_1_COMPLETE"
   | "REVIEWER_2_COMPLETE"
@@ -20,12 +21,7 @@ export type ReviewState =
   | "DISAGREEMENT"
   | "FINALIZED";
 export const REVIEW_STATES: ReviewState[] = [
-  "ENGINE_RECOMMENDED",
-  "REVIEWER_1_COMPLETE",
-  "REVIEWER_2_COMPLETE",
-  "AGREED",
-  "DISAGREEMENT",
-  "FINALIZED",
+  "ENGINE_RECOMMENDED", "REVIEWED", "FINALIZED",
 ];
 
 export type DecisionKind = "ACCEPT" | "OVERRIDE" | "CONFIRM_DISCREPANCY" | "NEEDS_MORE_INFORMATION";
@@ -64,10 +60,15 @@ export const DISCREPANCY_TYPES = [
 export interface Health {
   status: string;
   version: string;
-  workspace: string;
+  workspace?: string;
+  hosted?: boolean;
 }
 
 export interface RunListItem {
+  name: string;
+  owner: string;
+  permission: "owner" | "edit" | "view";
+  copied_from: string;
   run_id: string;
   created_at: string;
   input_root: string;
@@ -103,6 +104,10 @@ export interface InputFile {
 }
 
 export interface RunSummary {
+  name: string;
+  owner: string;
+  permission: "owner" | "edit" | "view";
+  copied_from: string;
   run_id: string;
   timestamp: string;
   input_root: string;
@@ -147,6 +152,7 @@ export interface Decision {
   seconds_spent?: number | null;
 }
 export interface Final {
+  self_approved?: boolean;
   final_decision: DecisionKind;
   finalized_by: string;
   finalized_at: string;
@@ -222,6 +228,7 @@ export interface ViewerParams {
 
 /** A server-side review session. The token is in an HttpOnly cookie and never reaches this code. */
 export interface ReviewSession {
+  is_admin: boolean;
   reviewer: string;
   slot: 1 | 2;
   blind: boolean;
@@ -297,6 +304,7 @@ export interface CheckResultFull {
 }
 
 export interface HistoryEvent {
+  self_approved?: boolean;
   event: string; // engine | reviewer_1 | reviewer_2 | final
   detail?: string;
   slot?: number;
@@ -313,6 +321,7 @@ export interface HistoryEvent {
 }
 
 export interface ActionItem {
+  permission?: "owner" | "edit" | "view";
   id: string;
   run_id: string;
   row_id: string;
@@ -333,6 +342,9 @@ export interface ActionItem {
 }
 
 export interface RowDetail {
+  permission: "owner" | "edit" | "view";
+  owner: string;
+  revision: number;
   result: CheckResultFull;
   evidence: { a: Evidence | null; b: Evidence | null };
   decisions: DecisionsBySlot;
@@ -545,3 +557,6 @@ export interface RoundTripResult {
   unknown_rows: string[];
   summary: string;
 }
+
+export interface Profile { email: string; status: "pending" | "approved" | "rejected"; is_admin: boolean | number; created_at: string }
+export interface RunShare { email: string; permission: "view" | "edit"; shared_by: string; shared_at: string }

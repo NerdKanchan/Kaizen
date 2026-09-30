@@ -6,7 +6,7 @@ import { api } from "../api";
 import { SeverityBadge, StatusBadge } from "../components/Badges";
 import { ErrorBox } from "../components/Feedback";
 import { Button, Card, CardHead, EmptyState, Field, PageHeader, TableSkeleton } from "../components/ui";
-import { enc, fmtDate } from "../lib/format";
+import { enc, fmtDate, issueLabel } from "../lib/format";
 import { useReviewer } from "../lib/reviewer";
 import { useToast } from "../lib/toast";
 import { errorMessage, useAsync } from "../lib/useAsync";
@@ -39,7 +39,7 @@ export default function ActionItemsPage() {
     <div>
       <PageHeader
         title="Action items"
-        description="Findings raised from confirmed discrepancies. Each one carries an owner and a status, and Verify and close on a later run's dashboard resolves the ones whose discrepancy is gone."
+        description="Track discrepancies that need follow-up, assign owners and update their status."
         actions={
           <Button variant="ghost" onClick={list.reload} icon={<ArrowsClockwise size={16} />}>
             Refresh
@@ -51,7 +51,7 @@ export default function ActionItemsPage() {
         {list.error && <ErrorBox error={list.error} onRetry={list.reload} />}
 
         <Card>
-          <CardHead title="Findings" count={list.data ? `${list.data.length} item${list.data.length === 1 ? "" : "s"}${filtered ? " matching" : ""}` : undefined} description="Change a status or an owner here; the change is recorded against your reviewer name." />
+          <CardHead title="Findings" count={list.data ? `${list.data.length} item${list.data.length === 1 ? "" : "s"}${filtered ? " matching" : ""}` : undefined} description="" />
 
           <div className="flex flex-wrap items-end gap-3 px-4 py-3 border-b border-line bg-surface-2/60">
             <Field label="Status" htmlFor="ai-status">
@@ -93,8 +93,8 @@ export default function ActionItemsPage() {
                 title={filtered ? "No action items match these filters" : "No action items yet"}
                 description={
                   filtered
-                    ? "Nothing in this workspace matches the status and run you chose. Clear the filters to see every action item."
-                    : "Action items are created from a row's evidence view: open a comparison, confirm the discrepancy, then raise the action item. It appears here with an owner and a status until a later run clears it."
+                    ? "Try another status or clear the filters."
+                    : "Open a comparison in the review queue to create an action item."
                 }
                 action={
                   filtered ? (
@@ -164,7 +164,7 @@ function Row({ a, highlighted, onChanged }: { a: ActionItem; highlighted: boolea
         <select
           className="input input-sm w-full mt-1.5"
           value={a.status}
-          disabled={busy}
+          disabled={busy || a.permission === "view"}
           aria-label={`Status for ${a.id}`}
           onChange={(e) => {
             const next = e.target.value as ActionStatus;
@@ -186,14 +186,14 @@ function Row({ a, highlighted, onChanged }: { a: ActionItem; highlighted: boolea
       <td className="min-w-[13rem]">
         <div className="text-ink">{a.detail}</div>
         <div className="text-xs text-ink-3 mt-0.5">
-          {CHECK_LABEL[a.check_type] ?? a.check_type} · <span className="mono">{a.discrepancy_type}</span>
+          {CHECK_LABEL[a.check_type] ?? a.check_type} · <span title={a.discrepancy_type}>{issueLabel(a.discrepancy_type)}</span>
         </div>
       </td>
       <td className="min-w-[11rem] text-ink-2">{a.recommended_action || "—"}</td>
       <td>
         <div className="flex items-center gap-1.5">
-          <input className="input input-sm w-28" value={owner} disabled={busy} placeholder="Unassigned" aria-label={`Owner for ${a.id}`} onChange={(e) => setOwner(e.target.value)} />
-          <Button size="sm" disabled={busy || owner === a.owner} onClick={() => void patch({ owner }, owner ? `owner set to ${owner}` : "owner cleared")} icon={<Check size={16} />}>
+          <input className="input input-sm w-28" value={owner} disabled={busy || a.permission === "view"} placeholder="Unassigned" aria-label={`Owner for ${a.id}`} onChange={(e) => setOwner(e.target.value)} />
+          <Button size="sm" disabled={busy || a.permission === "view" || owner === a.owner} onClick={() => void patch({ owner }, owner ? `owner set to ${owner}` : "owner cleared")} icon={<Check size={16} />}>
             Save
           </Button>
         </div>

@@ -158,7 +158,7 @@ export default function DocumentPage() {
             <span className="mono text-xl">{d.file_name}</span>
           </>
         }
-        description="Select a line to outline where it came from on the page. Everything on the right was read from the image on the left."
+        description="Select an extracted line to see its location in the source document."
         meta={
           <>
             <span>{plural(d.items.length, "extracted line")}</span>
@@ -172,7 +172,7 @@ export default function DocumentPage() {
       <div className="space-y-5 stagger">
         {d.warnings.length > 0 && (
           <Notice kind="warn">
-            <div className="font-medium">Parser warnings for this document</div>
+            <div className="font-medium">Extraction warnings for this document</div>
             <ul className="list-disc pl-4 mt-1 space-y-0.5">
               {d.warnings.map((w, i) => (
                 <li key={i}>{w}</li>
@@ -187,7 +187,7 @@ export default function DocumentPage() {
             <Card>
               <CardHead
                 title="Source page"
-                description={pdf ? "The page as it was filed. The outline marks where the selected line was read." : "A spreadsheet source has no page image."}
+                description={pdf ? "The selected line is highlighted on the page." : "Page previews are available for PDF files."}
                 actions={
                   pdf ? (
                     <>
@@ -216,7 +216,7 @@ export default function DocumentPage() {
                     bbox={selected && selected.page === page ? selected.bbox : null}
                     alt={`${d.file_name} page ${page}`}
                     maxHeight="64vh"
-                    fallback={<span className="text-ink-2">The page image could not be rendered. The extracted lines and their locators are still shown on the right.</span>}
+                    fallback={<span className="text-ink-2">The page preview is unavailable. Extracted text is still available.</span>}
                   />
                   {selectedElsewhere && (
                     <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-ink-3">
@@ -226,19 +226,19 @@ export default function DocumentPage() {
                       </Button>
                     </div>
                   )}
-                  {selected && !selectedElsewhere && selected.bbox === null && <p className="hint mt-2">No bounding box was recorded for this line, for example a document header, so the page is shown without an outline.</p>}
+                  {selected && !selectedElsewhere && selected.bbox === null && <p className="hint mt-2">No page highlight is available for this line.</p>}
                 </div>
               ) : (
                 <EmptyState
                   icon={<FileXls size={36} />}
                   title="No page image for this source"
-                  description="This document is a spreadsheet. Each extracted line carries its sheet and row locator and the raw cell text, shown under the selected line."
+                  description="Select a line to see its sheet, row and original cell text."
                 />
               )}
             </Card>
 
             <Card>
-              <CardHead title="Selected line" description="What the parser read, and where it read it." icon={<CursorClick size={18} />} />
+              <CardHead title="Selected line" description="Text and source location." icon={<CursorClick size={18} />} />
               {selected ? (
                 <dl className="kv p-4">
                   <dt>Line</dt>
@@ -272,13 +272,13 @@ export default function DocumentPage() {
                   </dd>
                 </dl>
               ) : (
-                <EmptyState icon={<CursorClick size={32} />} title="No line selected" description="Select a line on the right to see its locator, raw text and confidence, and to outline it on the page." />
+                <EmptyState icon={<CursorClick size={32} />} title="No line selected" description="Select an extracted line to view its details." />
               )}
             </Card>
 
             {header.length > 0 && (
               <Card>
-                <CardHead title="Document header" description="Fields read from above the line items." count={header.length} />
+                <CardHead title="Document header" description="" count={header.length} />
                 <dl className="kv p-4">
                   {header.map(([k, v]) => (
                     <div key={k} className="contents">
@@ -295,7 +295,7 @@ export default function DocumentPage() {
           <Card>
             <CardHead
               title="Extracted lines"
-              description="Select a line to outline it on the page."
+              description="Select a line to view its source."
               icon={<Rows size={18} />}
               count={filtering ? `${rows.length} of ${d.items.length}` : d.items.length}
               actions={
@@ -313,7 +313,7 @@ export default function DocumentPage() {
               }
             />
             {d.items.length === 0 ? (
-              <EmptyState icon={<Rows size={36} />} title="Nothing was extracted from this document" description="The parser read the file but produced no lines. Check the parser warnings above, then open the page image to see what the document actually contains." />
+              <EmptyState icon={<Rows size={36} />} title="Nothing was extracted from this document" description="Check the extraction warnings or open the source file." />
             ) : rows.length === 0 ? (
               <EmptyState icon={<MagnifyingGlass size={36} />} title="No line matches" description={`Clear the filter to see all ${plural(d.items.length, "extracted line")}.`} action={<Button onClick={clearFilters}>Clear filter</Button>} />
             ) : (
@@ -335,7 +335,7 @@ export default function DocumentPage() {
                     <tbody>
                       {rows.map(({ item, n }) => (
                         <tr key={item.id} className={`clickable ${item.is_active ? "" : "text-ink-4"}`} data-selected={item.id === selectedId ? "true" : undefined} onClick={() => select(item)}>
-                          <td className="num text-right text-ink-3">{n}</td>
+                          <td className="num text-right"><button type="button" className="text-brand-600 underline underline-offset-2" aria-label={`View extracted line ${n}`} aria-pressed={item.id === selectedId} onClick={e => { e.stopPropagation(); select(item); }}>{n}</button></td>
                           {pdf && <td className={`num text-right ${item.page === page ? "text-ink-2" : "text-ink-4"}`}>{item.page ?? "—"}</td>}
                           {cols.map((c) => (
                             <td key={c.h} className={c.cls}>

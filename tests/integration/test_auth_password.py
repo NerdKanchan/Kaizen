@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kaizen.api.app import create_app
+from kaizen.review.access import AccessStore
 from kaizen.review.sessions import MAX_FAILED, MIN_PASSWORD, UserStore, hash_password, verify_password
 from kaizen.workspace import Workspace
 
@@ -24,7 +25,11 @@ def client(tmp_path, monkeypatch):
 
 
 def signup(client, email=BD, password=PW):
-    return client.post("/api/auth/signup", json={"email": email, "password": password})
+    response = client.post("/api/auth/signup", json={"email": email, "password": password})
+    # Credential tests use approved members; pending membership is covered in test_collaboration.
+    if response.status_code == 200:
+        AccessStore(client.ws.db).update(email.strip().lower(), 'test administrator', 'approved', False)
+    return response
 
 
 def signin(client, email=BD, password=PW, slot=1, **extra):
@@ -37,18 +42,18 @@ def signin(client, email=BD, password=PW, slot=1, **extra):
 @pytest.mark.parametrize("email", ["user@gmail.com", "user@bd.com.evil.io", "user@notbd.com", "nobody", "@bd.com"])
 def test_only_bd_addresses_may_sign_up(client, email):
     r = signup(client, email)
-    assert r.status_code == 400 and r.json()["detail"] == "Only BD email addresses can sign in."
+    assert r.status_code == 400 and r.json()["detail"] == "Only BD email addresses can register or sign in."
 
 
 def test_a_lookalike_domain_cannot_sign_in_either(client):
     signup(client)
     r = signin(client, "user@bd.com.evil.io")
-    assert r.status_code == 400 and r.json()["detail"] == "Only BD email addresses can sign in."
+    assert r.status_code == 400 and r.json()["detail"] == "Only BD email addresses can register or sign in."
 
 
-def test_the_allowed_domain_set_is_configurable(client, monkeypatch):
+def test_non_bd_domains_cannot_be_enabled(client, monkeypatch):
     monkeypatch.setenv("KAIZEN_ALLOWED_DOMAINS", "bd.com, aad.example")
-    assert signup(client, "someone@aad.example").status_code == 200
+    assert signup(client, "someone@aad.example").status_code == 400
     assert signup(client, "someone@gmail.com").status_code == 400
 
 
@@ -69,7 +74,7 @@ def test_an_address_cannot_be_registered_twice(client):
 
 
 def test_sign_up_then_sign_in_opens_a_session(client):
-    assert signup(client).json() == {"ok": True, "email": BD}
+    assert signup(client).json() == {"ok": True, "email": BD, "status": "pending"}
     r = signin(client)
     assert r.status_code == 200, r.text
     s = r.json()
@@ -83,14 +88,14 @@ def test_the_address_is_normalised(client):
     assert signin(client, "DHARMA.REDDY@bd.com").json()["reviewer"] == BD
 
 
-def test_slot_two_is_blind_by_policy(client):
+def test_legacy_slot_does_not_enable_blind_mode(client):
     signup(client)
-    assert signin(client, slot=2).json()["blind"] is True
+    assert signin(client, slot=2).json()["blind"] is False
 
 
-def test_an_invalid_slot_is_refused(client):
+def test_slot_selection_is_ignored(client):
     signup(client)
-    assert signin(client, slot=7).status_code == 400
+    assert signin(client, slot=7).json()["slot"] == 1
 
 
 # ---- credentials that must not work ---------------------------------------------------------------
@@ -183,7 +188,7 @@ def test_clearing_an_account_keeps_decisions(client):
 
 def test_the_legacy_session_route_is_closed(client):
     r = client.post("/api/sessions", json={"reviewer": "Dharma", "slot": 1})
-    assert r.status_code == 403 and r.json()["detail"] == "Use /api/auth/signin"
+    assert r.status_code == 401 and "Sign in" in r.json()["detail"]
     assert client.get("/api/sessions/current").json()["session"] is None
 
 

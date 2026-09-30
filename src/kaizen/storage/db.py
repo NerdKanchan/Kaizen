@@ -5,6 +5,19 @@ import threading
 from pathlib import Path
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS profiles (
+    email TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
+    is_admin INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_shares (
+    run_id TEXT NOT NULL, email TEXT NOT NULL, permission TEXT NOT NULL,
+    shared_by TEXT NOT NULL, shared_at TEXT NOT NULL, PRIMARY KEY (run_id,email)
+);
+CREATE TABLE IF NOT EXISTS review_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
+    row_id TEXT NOT NULL, payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS review_events_row ON review_events(run_id,row_id);
 CREATE TABLE IF NOT EXISTS relationships (
     id TEXT PRIMARY KEY,
     canonical TEXT NOT NULL,
@@ -222,6 +235,12 @@ class Database:
         self._ensure_column("decisions", "override_classification", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("action_items", "resolved_at", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("decisions", "seconds_spent", "REAL")  # NULL = not timed
+        self._ensure_column("runs", "name", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("runs", "owner", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("runs", "copied_from", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("finals", "self_approved", "INTEGER NOT NULL DEFAULT 0")
+        self.conn.execute("INSERT OR IGNORE INTO profiles (email,status,is_admin,created_at) SELECT email,'pending',0,created_at FROM users")
+        self.conn.execute("UPDATE runs SET name = 'BOM review · ' || substr(created_at,1,10) WHERE name = ''")
         self.conn.commit()
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:

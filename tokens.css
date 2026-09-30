@@ -1,0 +1,22 @@
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4
+   Shared Kaizen tokens; existing semantic colours remain in ui/src/index.css. */
+:root {
+  --font-body: 'Geist Variable', sans-serif;
+  --font-display: var(--font-body);
+  --color-paper: rgb(var(--c-canvas));
+  --color-paper-2: rgb(var(--c-surface));
+  --color-ink: rgb(var(--c-ink));
+  --color-ink-2: rgb(var(--c-ink-3));
+  --color-rule: rgb(var(--c-line));
+  --color-accent: rgb(var(--c-accent-500));
+  --space-xs: .5rem;
+  --space-sm: .75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+  --radius-card: 10px;
+  --radius-input: 7px;
+  --dur-short: 150ms;
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+}

@@ -1,5 +1,10 @@
 # Kaizen Cross-Check
 
+## Hosted collaboration
+
+Kaizen now uses approved BD accounts, application administrators, and per-run ownership with View/Edit sharing. Users can make private copies, download independent workbooks and source files, and explicitly confirm self-approval. See [accounts, sharing and Render deployment](docs/hosted-collaboration.md). The web app no longer asks users to choose a facilitator or independent-reviewer slot; legacy CLI review commands remain available.
+
+
 [![CI](https://github.com/Rahulreddy-23/Kaizen/actions/workflows/ci.yml/badge.svg)](https://github.com/Rahulreddy-23/Kaizen/actions/workflows/ci.yml)
 
 Deterministic, explainable, traceable cross-checking of JDE BOMs against product labels, packaging drawings,
@@ -21,13 +26,9 @@ PCOs and label revisions, with the reviewer as the final decision-maker. Built f
   severity, explanation and evidence (file, SHA-256, page, bounding box, raw text).
 - Uses explicit, versioned terminology relationships (global / product-family / SKU, item-anchored) that
   reviewers create, edit, import/export, and that runs pin by version.
-- Signs reviewers in with a BD email address and a password (scrypt in the workspace, or optionally a
-  shared Supabase project so one account works on every laptop), and holds identity, slot and blind
-  mode in a **server-side session**, so a second reviewer cannot
-  unblind themselves from the browser, and every decision carries a real name.
-- Supports two reviewers with blind independent review, disagreement detection, finalisation, action items
-  and verify-and-close on corrective reruns; suggests new relationships from repeated pairings (human approval
-  required).
+- Requires an approved `@bd.com` account. Application administrators approve registrations and appoint other administrators.
+- Gives each uploaded run an owner, a descriptive name, and explicit View/Edit sharing. Shared runs appear in the recipient's workspace.
+- Records decisions and approvals with the user's identity. Self-approval requires confirmation and is labelled in the history. Independent copies keep their own documents, decisions and action items.
 - Turns the business-case projection into a **terminology worklist** (approve these pairings, in this order, and this many rows clear), **measures** review effort per row instead of assuming it, and keeps the reviewer on the keyboard (j/k/Enter, a/c/o/n, ? for help).
 - Produces an audit-grade Excel workbook, an annotated BOM PDF with coloured marks, measured accuracy against
   ground truth, and a business case computed from the actual run (measured figure plus a labelled projection
@@ -56,7 +57,7 @@ If PowerShell prevents activation, run `Set-ExecutionPolicy -Scope Process -Exec
 ## Run
 ```bash
 .venv/bin/kaizen run <folder> --out out/myrun   # one SKU set per sub-folder (bom.*, label.pdf, label_old.pdf, drawing.pdf) plus pco/*.xlsx|pdf
-.venv/bin/kaizen serve                          # local API + UI at http://127.0.0.1:8765 (sign up with your BD email, then sign in and pick a slot)
+.venv/bin/kaizen serve                          # local API + UI at http://127.0.0.1:8765 (register with your BD email, wait for admin approval, then sign in)
 ```
 
 On Windows PowerShell, use:
@@ -118,13 +119,10 @@ Details and the full diagram: `docs/final-architecture.md`. API contract: `docs/
 
 ## Limitations
 See `docs/known-limitations.md`. Headline items: no scanned-BOM OCR, no hand-drawn redlines, case labels not
-parsed, thresholds tuned on synthetic data, single-user local workspace, no compliance claim.
+parsed, thresholds tuned on synthetic data, one application instance per SQLite workspace, no compliance claim.
 
 ## Optional: shared sign-in with Supabase
-By default accounts live in each laptop's workspace, so an account made on one laptop does not work on
-another. To give each reviewer one account that works on every laptop, keep the accounts in a Supabase
-project. **Only the email address and password go to Supabase.** Sessions, reviewer slots, blind mode,
-decisions, runs and documents stay on the laptop, as before. Sign-in then needs internet access.
+The hosted app stores accounts in its central workspace by default. Supabase can optionally check passwords instead. **Only email and password authentication move to Supabase.** Kaizen's account approvals, sessions, decisions, run grants and documents remain in the central workspace. Provider accounts still need Kaizen administrator approval. Sign-in with this provider needs internet access.
 **No email is ever sent**: BD mail blocks external senders, so there are no confirmation or reset emails.
 
 In the Supabase dashboard (once per project):
@@ -134,7 +132,7 @@ In the Supabase dashboard (once per project):
 2. Copy the **Project URL** and the **anon / publishable** key (Project Settings → API Keys). Never use
    the `service_role` / secret key; Kaizen refuses it.
 
-Then on each laptop (once):
+Then configure the application server (once):
 ```bash
 .venv/bin/kaizen auth supabase https://<project>.supabase.co <anon-or-publishable-key>
 .venv/bin/kaizen auth show      # confirms where accounts are checked; `kaizen auth local` switches back

@@ -18,7 +18,7 @@ export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => vo
     <div role="alert" className="flex items-start gap-3 rounded-lg border border-bad/30 bg-bad-soft text-bad-strong px-4 py-3 text-sm">
       <WarningOctagon size={18} weight="fill" className="shrink-0 mt-0.5 text-bad" />
       <div className="flex-1 min-w-0 break-words">
-        <div className="font-medium">Something went wrong</div>
+        <div className="font-medium">Request failed</div>
         <div className="text-ink-2 mt-0.5">{error}</div>
       </div>
       {onRetry && (
@@ -32,7 +32,7 @@ export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => vo
 
 export function Notice({ kind = "info", children, className = "" }: { kind?: "info" | "good" | "warn" | "bad"; children: ReactNode; className?: string }) {
   const map = {
-    info: { cls: "border-brand-200 bg-brand-50 text-ink", icon: <Info size={18} weight="fill" className="text-brand-600" /> },
+    info: { cls: "border-line bg-surface-2 text-ink-2", icon: <Info size={18} weight="fill" className="text-ink-3" /> },
     good: { cls: "border-ok/30 bg-ok-soft text-ok-strong", icon: <CheckCircle size={18} weight="fill" className="text-ok" /> },
     warn: { cls: "border-warn/30 bg-warn-soft text-warn-strong", icon: <Warning size={18} weight="fill" className="text-warn" /> },
     bad: { cls: "border-bad/30 bg-bad-soft text-bad-strong", icon: <WarningOctagon size={18} weight="fill" className="text-bad" /> },

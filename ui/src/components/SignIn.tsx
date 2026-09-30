@@ -3,7 +3,7 @@
 // if the server decides who is blind. No email is ever sent (BD mail blocks external senders), so a
 // forgotten password is handled by an administrator: with local accounts they clear it (`kaizen users
 // reset`) and the reviewer signs up again; with Supabase accounts they set a new one in Supabase.
-import { Eye, EyeSlash, UserCircle, UsersThree } from "@phosphor-icons/react";
+import { Eye, EyeSlash } from "@phosphor-icons/react";
 import { useState } from "react";
 import { useReviewer } from "../lib/reviewer";
 import { ThemeToggle } from "./ThemeToggle";
@@ -36,16 +36,14 @@ function PasswordInput({ id, value, onChange, autoComplete }: { id: string; valu
 }
 
 export function SignIn() {
-  const { signUp, signIn, policy, error, accounts } = useReviewer();
+  const { signUp, signIn, error } = useReviewer();
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [slot, setSlot] = useState<1 | 2>(1);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const required = policy === "required";
 
   const address = email.trim().toLowerCase();
   const looksBd = address.endsWith(BD_DOMAIN) && address.length > BD_DOMAIN.length;
@@ -73,9 +71,9 @@ export function SignIn() {
         setMode("signin");
         setPassword("");
         setConfirm("");
-        setNotice("Account created. Sign in to start reviewing.");
+        setNotice("Registration received. An administrator must approve your account before you can sign in.");
       } else {
-        await signIn(address, password, slot);
+        await signIn(address, password, 1);
       }
     } catch (err) {
       setFailed((err as Error).message);
@@ -83,16 +81,6 @@ export function SignIn() {
       setBusy(false);
     }
   }
-
-  const roles: { n: 1 | 2; title: string; body: string; icon: React.ReactNode }[] = [
-    { n: 1, title: "Reviewer 1 · BOM facilitator", body: "Prepares the review and records the first decision on each row.", icon: <UserCircle size={22} /> },
-    {
-      n: 2,
-      title: "Reviewer 2 · independent",
-      body: required ? "Reviews blind: reviewer 1's decision on a row stays hidden until you record your own." : "Second review. Blind mode is optional in this workspace.",
-      icon: <UsersThree size={22} />,
-    },
-  ];
 
   return (
     <div className="min-h-screen bg-canvas flex items-center justify-center p-6">
@@ -110,10 +98,10 @@ export function SignIn() {
           </div>
         </div>
 
-        <h1 className="text-2xl mb-1">{mode === "signin" ? "Sign in to review" : "Create your account"}</h1>
+        <h1 className="text-2xl mb-1">{mode === "signin" ? "Sign in" : "Create your account"}</h1>
         <p className="text-sm text-ink-3 mb-5">
           {mode === "signin"
-            ? "Every decision is recorded against your BD email address. Choose the slot you are reviewing in."
+            ? "Use your BD account to access Kaizen."
             : `Use your BD email address. Pick a password of at least ${MIN_PASSWORD} characters.`}
         </p>
 
@@ -127,7 +115,7 @@ export function SignIn() {
             spellCheck={false}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="e.g. dharma.reddy@bd.com"
+            placeholder="name@bd.com"
           />
         </Field>
 
@@ -139,41 +127,6 @@ export function SignIn() {
           <Field label="Confirm password" htmlFor="reviewer-confirm" className="mb-4" error={mismatch ? "The two passwords do not match" : undefined}>
             <PasswordInput id="reviewer-confirm" value={confirm} onChange={setConfirm} autoComplete="new-password" />
           </Field>
-        )}
-
-        {mode === "signin" && (
-          <fieldset className="mb-5">
-            <legend className="label">Reviewer slot</legend>
-            <div className="grid gap-2">
-              {roles.map((r) => {
-                const on = slot === r.n;
-                return (
-                  <label
-                    key={r.n}
-                    className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-[border-color,background-color,box-shadow] duration-150 ease-out ${
-                      on ? "border-accent-500 bg-accent-50 glow-accent" : "border-line hover:border-line-2 hover:bg-surface-2/60"
-                    }`}
-                  >
-                    <input type="radio" name="slot" className="sr-only" checked={on} onChange={() => setSlot(r.n)} />
-                    <span className={`shrink-0 mt-0.5 ${on ? "text-accent-600" : "text-ink-3"}`}>{r.icon}</span>
-                    <span>
-                      <span className="block text-sm font-medium text-ink">{r.title}</span>
-                      <span className="block text-xs text-ink-3 mt-0.5">{r.body}</span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
-        )}
-
-        {mode === "signin" && (
-          <div className="flex items-start gap-2 text-xs text-ink-3 mb-5">
-            <EyeSlash size={16} className="shrink-0 mt-0.5" />
-            <span>
-              Blind review is <b className="text-ink">{required ? "required" : "optional"}</b> in this workspace. The policy is server-side; change it with <span className="mono">kaizen review policy</span>.
-            </span>
-          </div>
         )}
 
         {notice && (
@@ -188,7 +141,7 @@ export function SignIn() {
         )}
 
         <Button variant="primary" size="lg" className="w-full" type="submit" loading={busy} disabled={!ready}>
-          {mode === "signin" ? "Start reviewing" : "Create account"}
+          {mode === "signin" ? "Sign in" : "Create account"}
         </Button>
 
         <div className="mt-4 text-xs text-ink-3 text-center">
@@ -196,7 +149,7 @@ export function SignIn() {
             <>
               No account yet?{" "}
               <button type="button" className="underline hover:text-ink" onClick={() => switchTo("signup")}>
-                Create one
+                Create account
               </button>
             </>
           ) : (
@@ -210,13 +163,7 @@ export function SignIn() {
         </div>
         {mode === "signin" && (
           <p className="mt-3 text-2xs text-ink-3 text-center leading-relaxed">
-            {accounts === "supabase" ? (
-              "Forgotten your password? Ask the Kaizen admin to set a new one for you."
-            ) : (
-              <>
-                Forgotten your password? Ask whoever runs this workspace to clear your account with <span className="mono">kaizen users reset</span>, then create it again.
-              </>
-            )}
+            Forgot your password? Contact your administrator.
           </p>
         )}
       </form>

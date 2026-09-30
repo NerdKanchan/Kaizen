@@ -72,7 +72,7 @@ export function SaveRelationshipPanel({ runId, detail, onCreated }: { runId: str
         notes: notes.trim() || undefined,
       });
       setCreated(rel);
-      toast({ tone: "ok", title: `Relationship ${rel.id} created`, description: "The next run applies it automatically. This run's rows are unchanged." });
+      toast({ tone: "ok", title: `Relationship ${rel.id} created`, description: "Saved for future runs." });
       onCreated();
     } catch (e) {
       setErr(errorMessage(e));
@@ -83,7 +83,7 @@ export function SaveRelationshipPanel({ runId, detail, onCreated }: { runId: str
 
   return (
     <Card>
-      <CardHead title="Terminology" icon={<BookmarkSimple size={18} />} description="Turn this pairing into an explicit, versioned rule the engine applies next time." />
+      <CardHead title="Terminology" icon={<BookmarkSimple size={18} />} description="Save these terms as equivalent for future runs." />
       <div className="p-5 space-y-3">
         {existingLine}
         {created ? (
@@ -98,7 +98,7 @@ export function SaveRelationshipPanel({ runId, detail, onCreated }: { runId: str
                 , anchored to <span className="mono">{created.item_anchors.join(", ")}</span>
               </>
             )}
-            ). The next run will use it; this run's rows stay as they are so the audit trail holds.
+            ). Saved for future runs.
           </Notice>
         ) : !open ? (
           <div className="space-y-2">
@@ -175,7 +175,7 @@ export function ActionItemPanel({ runId, detail, onCreated }: { runId: string; d
   const hasDisc = detail.result.discrepancies.length > 0;
   return (
     <Card>
-      <CardHead title="Action items" icon={<ClipboardText size={18} />} description="Track this discrepancy as a finding; a corrected rerun resolves it by comparison key." />
+      <CardHead title="Action items" icon={<ClipboardText size={18} />} description="Create a follow-up task for this discrepancy." />
       <div className="p-5 space-y-3">
         {detail.action_items.length > 0 ? (
           <ul className="space-y-1.5 text-sm">
@@ -195,8 +195,8 @@ export function ActionItemPanel({ runId, detail, onCreated }: { runId: string; d
         ) : (
           <div className="text-sm text-ink-3">None for this row.</div>
         )}
-        <div className="flex gap-2 items-center">
-          <input className="input flex-1" placeholder="Owner (optional)" value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner" />
+        <div className="flex flex-wrap gap-2 items-center">
+          <input className="input flex-1 min-w-0 basis-32" placeholder="Owner (optional)" value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner" />
           <Button loading={busy} disabled={!name || !hasDisc} onClick={create} title={hasDisc ? "" : "This row has no discrepancy to track"}>
             Create action item
           </Button>

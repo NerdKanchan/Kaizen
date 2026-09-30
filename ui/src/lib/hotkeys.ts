@@ -12,10 +12,16 @@ export function isTyping(target: EventTarget | null): boolean {
   return t.isContentEditable === true;
 }
 
+/** Native controls and dialogs own their keys; row shortcuts only run on the page. */
+export function ownsKeyboard(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  return isTyping(target) || !!element?.closest?.('a[href], button, summary, [role="button"], [role="dialog"], [contenteditable="true"]');
+}
+
 export function useHotkeys(map: HotkeyMap, deps: unknown[]) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || ownsKeyboard(e.target)) return;
       const fn = map[e.key];
       if (!fn) return;
       e.preventDefault();

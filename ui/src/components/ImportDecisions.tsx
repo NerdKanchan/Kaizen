@@ -61,7 +61,7 @@ export function ImportDecisions({ runId, onApplied }: { runId: string; onApplied
         open={open}
         onClose={reset}
         title="Import decisions from Excel"
-        description={`Optional. Only your own columns (reviewer ${session?.slot ?? 1}) are read; the workbook must belong to this run.`}
+        description="Select the exported workbook for this run. Decisions and comments will be imported."
         footer={
           <>
             <Button variant="ghost" onClick={reset}>

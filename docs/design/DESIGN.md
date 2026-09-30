@@ -174,3 +174,127 @@ Eyebrows and section numbers; nested cards; coloured left borders thicker than 1
 glass or blur as decoration; monospace as a costume; emoji icons; white text on orange; animation on
 keyboard-driven actions; any colour whose meaning is not stated in words next to it; a dark theme made
 by inverting the light one; hard-coded hex colours in components.
+
+## September 2026 navigation revision
+
+This section supersedes the earlier shell dimensions and workspace hierarchy.
+The intent is to help reviewers find their work and identify their next action.
+
+- Workspace home is **All runs**. It combines owned and shared runs by default,
+  with ownership filters and name, ID or owner search persisted in the URL.
+- **New cross-check** opens a focused dialog. Folder upload is primary; demo data
+  and administrator-only local paths are secondary options. Errors remain in the
+  dialog, which traps focus and returns it on close.
+- A 248px desktop sidebar groups Workspace, Current run, and Analysis. Desktop
+  collapse is remembered. Below 1024px a labelled menu replaces the icon rail.
+- Workspace destinations appear first. Run destinations appear only after a run
+  is selected. The current run selector appears on run pages, where it is relevant.
+- **Overview**, **Review queue**, and **Documents** form the main review flow.
+  Suggested matches, Compare runs, and Business case are separate analysis tools.
+- The overview puts the queue action first. Sharing, copying, exports and
+  verification remain under **Share, export and manage this run**.
+- The queue exposes SKU, check, review status, search and flagged-only selection.
+  Discrepancy, severity, classification and role live under **More filters**,
+  automatically expanded when one of those filters is present in a deep link.
+- Engine flags are labelled as engine results, not as live outstanding review
+  counts. Ownership and access remain visible on run entries.
+- Shared page headings use a 24–30px scale. Light surfaces use a cool neutral
+  canvas; semantic status colours, dark mode, and the BD accent remain.
+- Native links, buttons, disclosures, form fields and dialogs retain their own
+  keyboard behavior. Review shortcuts must not consume their Enter key.
+
+### Research and application
+
+Reviewed official product guidance on 2026-09-30:
+
+- [Notion sidebar](https://www.notion.com/en-gb/help/navigate-with-the-sidebar):
+  grouped destinations, a stable home and a clear workspace context.
+- [Linear team pages](https://linear.app/docs/default-team-pages): focused views
+  for distinct kinds of work; applied as common review filters and separate analysis.
+- [Atlassian navigation](https://support.atlassian.com/navigation/docs/navigation-best-practices/):
+  keep relevant destinations accessible and let users collapse navigation.
+
+These references informed interaction patterns; no assets or page designs were copied.
+
+### Route inventory
+
+| Page | Purpose |
+| --- | --- |
+| RunsPage | Find owned/shared runs and start a cross-check |
+| DashboardPage | Inspect run results and enter review |
+| ReviewQueuePage | Filter comparisons and select evidence |
+| EvidencePage | Examine evidence and record a decision |
+| DocumentsPage | Find source documents by SKU |
+| DocumentPage | Inspect extracted document content |
+| MiningPage | Inspect suggested terminology matches |
+| BusinessCasePage | Inspect measured effort and projections |
+| DiffPage | Compare discrepancies across runs |
+| TerminologyPage | Manage terminology relationships |
+| ActionItemsPage | Track follow-up work |
+| AdminPage | Manage approved accounts |
+
+The shared shell and headings apply across these routes. Detailed content redesign
+in this revision focuses on workspace home, run overview and review queue.
+
+## September 2026 copy and appearance refinement
+
+This section supersedes the earlier palette, shell dimensions and animation guidance.
+
+### Writing
+
+Use short page titles and concrete instructions. Home begins with run totals,
+filters and the list of runs. Introductory slogans have been removed. Describe
+what the reviewer can do; avoid promises, metaphors and repeated explanations.
+Use human-readable issue names in the interface while retaining the original
+codes in API requests and recorded results. Estimates remain explicitly labelled
+as estimates, with their assumptions available on the page.
+
+### Appearance
+
+| Role | Light | Dark |
+| --- | --- | --- |
+| Canvas | `#F8F9FB` | `#14161B` |
+| Surface | `#FFFFFF` | `#1B1E24` |
+| Secondary surface | `#F5F6F8` | `#22252C` |
+| Main text | `#1E242E` | `#EBEEF4` |
+| Secondary text | `#4A5463` | `#C5CBD6` |
+| Muted text | `#636E7F` | `#A3ACBB` |
+| Sidebar | `#F5F6F8` | `#17191E` |
+| Primary action | `#FF6E00` | `#F49F62` |
+| Primary action text | `#181B21` | `#181B21` |
+
+The sidebar is 240px wide and the top bar is 60px high. Statuses use restrained
+backgrounds and explicit labels. Cards use 10px corners; inputs and buttons use
+7px corners. Geist remains the main font. Geist Mono is reserved for identifiers
+and extracted source text. Decorative arrival and bar animations are disabled.
+
+### Page layout and access
+
+- Home shows actual total, owned and shared run counts above the run list.
+- The overview prioritises review status. Version identifiers remain under Run record.
+- Comparison pages show a readable check title, explanation, discrepancies and
+  recommended next steps. Source-document and decision buttons jump within the page
+  without changing the route. The decision panel sits beside the source documents
+  on wide screens, and history is an expandable section.
+- Business case separates the current estimate from future-run terminology estimates.
+- Shared field labels are linked to their controls. Hints and errors on direct
+  input controls are associated through `aria-describedby`.
+- Document lines and terminology relationships have keyboard-operable selection
+  buttons. Tables retain their own horizontal scrolling on narrow screens.
+- Search, import, sharing and action-item controls wrap within narrow layouts.
+- Sign-in, account creation, access-denied and missing-page views use the same system.
+
+### References
+
+Reviewed on 2026-09-30:
+
+- [Atlassian voice and tone](https://atlassian.design/foundations/content/voice-tone):
+  concise, practical instructions informed the writing pass.
+- [Primer colour primitives](https://primer.style/product/primitives/color/):
+  semantic roles informed the palette and status treatment.
+- [GitHub's inclusive colour system](https://github.blog/engineering/unlocking-inclusive-design-how-primers-color-system-is-making-github-com-more-inclusive/):
+  informed contrast checks and distinct light/dark surface levels.
+
+Validation and local backend limitations are recorded in
+[UX-verification.md](UX-verification.md). This refinement covers the shared system
+and copy across all twelve application pages and the authentication views.

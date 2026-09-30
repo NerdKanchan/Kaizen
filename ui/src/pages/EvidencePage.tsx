@@ -9,7 +9,7 @@ import { ErrorBox, Loading } from "../components/Feedback";
 import { HotkeyHelp, HotkeyHint } from "../components/HotkeyHelp";
 import { ActionItemPanel, SaveRelationshipPanel } from "../components/RowActions";
 import { Button, Card, LinkButton, PageHeader } from "../components/ui";
-import { enc, fmtScore } from "../lib/format";
+import { enc, fmtScore, issueLabel } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { PAGE_SIZE, queueParams, queueQueryFromParams } from "../lib/queue";
 import { useReviewer } from "../lib/reviewer";
@@ -55,7 +55,7 @@ export default function EvidencePage() {
   const { runId = "", rowId = "" } = useParams();
   const [sp] = useSearchParams();
   const nav = useNavigate();
-  const { viewerParams } = useReviewer();
+  const { viewerParams, session } = useReviewer();
   const detail = useAsync(() => api.getRow(runId, rowId, viewerParams), [runId, rowId, viewerParams.viewer, viewerParams.blind]);
   const nb = useNeighbors(runId, rowId, sp, viewerParams);
 
@@ -90,7 +90,7 @@ export default function EvidencePage() {
         back={{ to: queueLink, label: "Queue" }}
         title={
           <>
-            <span className="mono text-xl whitespace-nowrap">{res.row_id}</span>
+            <span>{CHECK_LABEL[res.check] ?? res.check}</span>
             {topSeverity && <SeverityBadge value={topSeverity} size="md" />}
             <RoleTag value={res.role} />
           </>
@@ -100,7 +100,7 @@ export default function EvidencePage() {
             <span>
               SKU <span className="mono text-ink">{res.sku}</span>
             </span>
-            <span>{CHECK_LABEL[res.check] ?? res.check}</span>
+            <span className="mono comparison-id">{res.row_id}</span>
             {nb.data?.index !== null && nb.data && (
               <span className="num">
                 {nb.data.index} of {nb.data.total} in the queue
@@ -108,6 +108,8 @@ export default function EvidencePage() {
             )}
             {nb.data && nb.data.index === null && !nb.loading && <span>Not in the current queue filter</span>}
             <HotkeyHint />
+            <Button size="sm" variant="ghost" onClick={() => document.getElementById("source-documents")?.scrollIntoView({ block: "start" })}>Source documents</Button>
+            <Button size="sm" variant="ghost" onClick={() => { document.getElementById("review-decision")?.scrollIntoView({ block: "start" }); document.querySelector<HTMLSelectElement>("#review-decision select")?.focus({ preventScroll: true }); }}>Decision</Button>
           </>
         }
         actions={
@@ -137,13 +139,13 @@ export default function EvidencePage() {
       <div className="space-y-5">
         {/* ---- the engine's recommendation and why */}
         <Card>
-          <div className="grid gap-5 lg:grid-cols-[16rem_1fr] p-5">
+          <div className="evidence-summary">
             <div>
-              <div className="text-xs font-medium text-ink-2">Engine recommendation</div>
+              <div className="text-xs font-medium text-ink-2">Automated result</div>
               <div className="mt-1.5">
-                <ClassificationBadge value={res.classification} size="lg" title="Engine recommendation, not a reviewer decision" />
+                <ClassificationBadge value={res.classification} size="lg" title="Automated result" />
               </div>
-              <div className={`text-xs mt-2 font-medium ${res.requires_validation ? "text-bad-strong" : "text-ok-strong"}`}>{res.requires_validation ? "Requires human validation" : "Auto-cleared: no validation required"}</div>
+              <div className={`text-xs mt-2 font-medium ${res.requires_validation ? "text-bad-strong" : "text-ok-strong"}`}>{res.requires_validation ? "Flagged for review" : "Auto-cleared"}</div>
               {d.effective_classification !== res.classification && (
                 <div className="mt-3">
                   <div className="text-xs font-medium text-ink-2">After reviewer override</div>
@@ -178,55 +180,40 @@ export default function EvidencePage() {
               </dl>
             </div>
             <div className="min-w-0">
-              <div className="text-xs font-medium text-ink-2">Why</div>
-              <p className="text-md font-medium text-ink mt-1 leading-6">{res.explanation}</p>
+              <div className="text-xs font-medium text-ink-2">Explanation</div>
+              <p className="text-sm text-ink mt-1 leading-6">{res.explanation}</p>
               {res.discrepancies.length > 0 ? (
-                <div className="mt-4 -mx-5 -mb-5 border-t border-line">
-                  <div className="overflow-x-auto">
-                    <table className="tbl">
-                      <thead>
-                        <tr>
-                          <th>Severity</th>
-                          <th>Discrepancy</th>
-                          <th>Detail</th>
-                          <th>Recommended action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {res.discrepancies.map((x, i) => (
-                          <tr key={i}>
-                            <td>
-                              <SeverityBadge value={x.severity} />
-                            </td>
-                            <td className="mono whitespace-nowrap">{x.type}</td>
-                            <td className="text-ink-2">{x.detail}</td>
-                            <td className="text-ink">{x.recommended_action || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                <ul className="discrepancy-details mt-4 space-y-4">
+                  {res.discrepancies.map((x, i) => (
+                    <li key={i} className="border-t border-line pt-4">
+                      <div className="flex flex-wrap items-center gap-2"><SeverityBadge value={x.severity} /><h2 className="text-sm font-medium">{issueLabel(x.type)}</h2></div>
+                      {x.detail !== res.explanation && <p className="text-sm text-ink-2 mt-2">{x.detail}</p>}
+                      {x.recommended_action && <p className="text-sm text-ink mt-2"><span className="font-medium">Next step: </span>{x.recommended_action}</p>}
+                    </li>
+                  ))}
+                </ul>
               ) : (
-                <div className="text-sm text-ink-3 mt-2">No discrepancy recorded by the engine.</div>
+                <div className="text-sm text-ink-3 mt-2">No discrepancy found.</div>
               )}
             </div>
           </div>
         </Card>
 
         {/* ---- the evidence, side by side */}
-        <div className="grid xl:grid-cols-2 gap-5">
+        <div className="review-workspace">
+        <div id="source-documents" className="evidence-sources grid gap-5">
           <EvidenceCard side="A" runId={runId} rowId={rowId} ev={d.evidence.a} itemId={res.source_a?.id} />
           <EvidenceCard side="B" runId={runId} rowId={rowId} ev={d.evidence.b} itemId={res.source_b?.id} />
         </div>
 
         {/* ---- decide, and what follows from it */}
-        <div className="grid xl:grid-cols-[3fr_2fr] gap-5">
+        <aside id="review-decision" className="review-tools space-y-5">
           <DecisionPanel runId={runId} rowId={rowId} detail={d} onChanged={detail.reload} />
           <div className="space-y-5">
-            <SaveRelationshipPanel runId={runId} detail={d} onCreated={detail.reload} />
-            <ActionItemPanel runId={runId} detail={d} onCreated={detail.reload} />
+            {d.permission !== "view" && session?.is_admin && <SaveRelationshipPanel runId={runId} detail={d} onCreated={detail.reload} />}
+            {d.permission !== "view" && <ActionItemPanel runId={runId} detail={d} onCreated={detail.reload} />}
           </div>
+        </aside>
         </div>
       </div>
     </div>

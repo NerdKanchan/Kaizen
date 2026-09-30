@@ -39,7 +39,7 @@ export default {
         },
         // BD orange is the same in both themes; only its soft surfaces change. accent-ink is the text
         // colour on orange: always ink, never white (DESIGN.md).
-        accent: { 50: v("accent-50"), 100: v("accent-100"), 200: v("accent-200"), 400: "#FF8A33", 500: "#FF6E00", 600: "#E56300", 700: "#B84E00", ink: "#05093D" },
+        accent: { 50: v("accent-50"), 100: v("accent-100"), 200: v("accent-200"), 400: v("accent-400"), 500: v("accent-500"), 600: v("accent-600"), 700: v("accent-700"), ink: v("accent-ink") },
         ok: { DEFAULT: v("ok"), soft: v("ok-soft"), strong: v("ok-strong") },
         warn: { DEFAULT: v("warn"), soft: v("warn-soft"), strong: v("warn-strong") },
         bad: { DEFAULT: v("bad"), soft: v("bad-soft"), strong: v("bad-strong") },

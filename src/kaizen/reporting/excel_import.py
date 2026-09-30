@@ -93,7 +93,7 @@ def _column_map(sheet) -> dict[str, int]:
     return {str(c.value): i + 1 for i, c in enumerate(sheet[1]) if c.value is not None}
 
 
-def import_decisions(workspace, run: Run, path: Path | str, slot: int, reviewer: str, *, dry_run: bool = False, force: bool = False) -> RoundTripResult:
+def import_decisions(workspace, run: Run, path: Path | str, slot: int, reviewer: str, *, dry_run: bool = False, force: bool = False, review_store: ReviewStore | None = None) -> RoundTripResult:
     if slot not in SLOT_COLUMNS:
         raise ValueError("reviewer slot must be 1 or 2")
     reviewer = (reviewer or "").strip()
@@ -109,7 +109,7 @@ def import_decisions(workspace, run: Run, path: Path | str, slot: int, reviewer:
         raise ValueError(f"this workbook belongs to run {meta.get('Run ID') or '(unknown)'}, not {run_id}; export the workbook for this run first")
     exported_at = meta.get("Exported at")
     result = RoundTripResult(run_id, slot, reviewer, dry_run, force, exported_at)
-    review = ReviewStore(workspace.db)
+    review = review_store or ReviewStore(workspace.db)
     known = {r.row_id for r in run.results}
     finalized = set(review.finals(run_id))
     decision_col, comment_col = SLOT_COLUMNS[slot]

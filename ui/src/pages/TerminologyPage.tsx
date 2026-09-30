@@ -1,4 +1,4 @@
-// Terminology relationships: the versioned rules that let the next run clear a wording it has already
+// Terminology: the versioned rules that let the next run clear a wording it has already
 // seen. Visual rules: docs/design/DESIGN.md. Routes, API calls and behaviour are unchanged.
 import { ArrowsClockwise, Check, CheckCircle, ClockCounterClockwise, FileArrowUp, FileXls, MagnifyingGlass, Plus, Prohibit, TextAa, X } from "@phosphor-icons/react";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
@@ -118,8 +118,8 @@ export default function TerminologyPage() {
   return (
     <div>
       <PageHeader
-        title="Terminology relationships"
-        description="The rules that let the next run clear a wording it has already seen. Reviewers maintain them; they are not model weights, and every run records the exact versions it used."
+        title="Terminology"
+        description="Manage terms that should be treated as equivalent in future runs."
         actions={
           <>
             <Button variant="primary" icon={<Plus size={16} />} onClick={() => setCreating(true)}>
@@ -131,7 +131,7 @@ export default function TerminologyPage() {
 
       <div className="space-y-5 stagger">
         <Notice>
-          Editing a rule saves a new version rather than replacing it, and deactivating one only stops future runs using it. Past runs, and the classifications they recorded, never change.
+          Changes apply to future runs. Previous versions are kept in the history.
         </Notice>
 
         <div className="flex flex-col xl:flex-row gap-5 items-start">
@@ -147,7 +147,7 @@ export default function TerminologyPage() {
             />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-b border-line bg-surface-2/60">
               <form
-                className="flex items-center gap-2"
+                className="terminology-search flex flex-wrap items-center gap-2 max-w-full"
                 onSubmit={(e) => {
                   e.preventDefault();
                   setApplied(search.trim());
@@ -202,7 +202,7 @@ export default function TerminologyPage() {
                 title={noneAtAll ? "No relationships yet" : "No relationships match"}
                 description={
                   noneAtAll
-                    ? "Create one from a wording pair you have confirmed, or import a spreadsheet below. The next run applies it and clears those rows on its own."
+                    ? "Add a confirmed term pair or import a spreadsheet."
                     : "Clear the search or widen the scope filter to see the rest, or create a relationship for the wording you were looking for."
                 }
                 action={
@@ -231,7 +231,7 @@ export default function TerminologyPage() {
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id} className={`clickable ${r.id === selectedId ? "selected" : ""}`} onClick={() => openRel(r.id)}>
-                        <td className="mono whitespace-nowrap">{r.id}</td>
+                        <td className="mono whitespace-nowrap"><button type="button" className="text-brand-600 underline underline-offset-2" aria-label={`Open relationship ${r.id}: ${r.canonical}`} onClick={e => { e.stopPropagation(); openRel(r.id); }}>{r.id}</button></td>
                         <td className="min-w-[16rem]">
                           <div className={`font-medium ${r.active ? "text-ink" : "text-ink-3"}`}>{r.canonical}</div>
                           {r.aliases.length > 0 && (
@@ -296,11 +296,11 @@ export default function TerminologyPage() {
         <Card>
           <CardHead
             title="Import and export"
-            description="A spreadsheet (.xlsx) or CSV with the same columns as the export. Every imported row is versioned and attributed, like any other change."
+            description="Import an XLSX or CSV file using the exported column format."
           />
           <div className="p-4 space-y-3">
             <div className="flex flex-wrap items-end gap-3">
-              <Field label="File to import" htmlFor="terminology-import" className="min-w-[20rem]">
+              <Field label="File to import" htmlFor="terminology-import" className="w-full sm:w-80 max-w-full">
                 <input
                   id="terminology-import"
                   type="file"
@@ -343,7 +343,7 @@ export default function TerminologyPage() {
             setCreating(false);
             list.reload();
             openRel(rel.id);
-            toast({ tone: "ok", title: `Relationship ${rel.id} created`, description: "The next run will apply it. Runs already recorded are unchanged." });
+            toast({ tone: "ok", title: `Relationship ${rel.id} created`, description: "Saved for future runs." });
           }}
         />
       )}
@@ -447,7 +447,7 @@ function RelationshipPanel({ id, onClose, onChanged }: { id: string; onClose: ()
           <div className="space-y-3">
             <div>
               <h3 className="text-sm font-semibold text-ink">Edit</h3>
-              <p className="hint mt-0.5">Saving records a new version with your name and the change note. Runs already recorded keep the version they used.</p>
+              <p className="hint mt-0.5">Changes apply to future runs. Previous versions remain in the history.</p>
             </div>
             <Field label="Canonical term" htmlFor={`${uid}-canonical`}>
               <input id={`${uid}-canonical`} className="input w-full" value={form.canonical} onChange={(e) => setForm({ ...form, canonical: e.target.value })} />
@@ -480,10 +480,10 @@ function RelationshipPanel({ id, onClose, onChanged }: { id: string; onClose: ()
               </div>
               <p className="hint mt-1">{form.doc_types.length === 0 ? "None selected, so the rule applies to every document type." : "The rule applies only to the types selected."}</p>
             </div>
-            <Field label="Notes" hint="Why this rule exists: the source, and who confirmed it." htmlFor={`${uid}-notes`}>
+            <Field label="Notes" hint="Add the source or reason for this relationship." htmlFor={`${uid}-notes`}>
               <textarea id={`${uid}-notes`} className="input w-full" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </Field>
-            <Field label="Change note" hint="Why this edit." htmlFor={`${uid}-note`}>
+            <Field label="Change note" hint="Describe what changed." htmlFor={`${uid}-note`}>
               <input id={`${uid}-note`} className="input w-full" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
             </Field>
             {!name && <Notice kind="warn">Sign in at the top bar first: every change records who made it.</Notice>}
@@ -604,7 +604,7 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
       open
       onClose={onClose}
       title="New relationship"
-      description="A manual rule: one canonical wording and the alternatives that mean the same thing."
+      description="Enter the preferred term and its equivalent terms."
       width="lg"
       footer={
         <>
@@ -654,7 +654,7 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
         </div>
         <p className="hint mt-1">{form.doc_types.length === 0 ? "None selected, so the rule applies to every document type." : "The rule applies only to the types selected."}</p>
       </div>
-      <Field label="Notes" hint="Why this rule exists: the source, and who confirmed it." htmlFor={`${uid}-notes`}>
+      <Field label="Notes" hint="Add the source or reason for this relationship." htmlFor={`${uid}-notes`}>
         <textarea id={`${uid}-notes`} className="input w-full" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </Field>
       {!name && <Notice kind="warn">Sign in at the top bar first: every relationship records who created it.</Notice>}

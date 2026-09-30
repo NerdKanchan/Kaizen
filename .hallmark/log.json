@@ -1,0 +1,18 @@
+[
+  {
+    "date": "2026-09-30",
+    "scope": "app",
+    "macrostructure": "Workbench \u2014 compact run summary and document review with decision sidebar",
+    "theme": "Existing BD identity with neutral light and charcoal dark surfaces",
+    "enrichment": "none",
+    "brief": "Remove slogans, rewrite interface copy, refine both themes and fix narrow-screen controls"
+  },
+  {
+    "date": "2026-09-30",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "Existing BD navy and orange",
+    "enrichment": "none",
+    "brief": "Simplify workspace discovery, run navigation and the review workflow"
+  }
+]

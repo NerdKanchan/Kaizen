@@ -94,7 +94,7 @@ class ReviewStore:
         row = self.conn.execute("SELECT opened_at FROM row_views WHERE run_id = ? AND row_id = ? AND reviewer_slot = ?", (run_id, row_id, slot)).fetchone()
         return row["opened_at"] if row else None
 
-    def decide(self, run_id: str, row_id: str, slot: int, reviewer: str, decision: str, comment: str = "", override_classification: str | None = None, blind: bool = False, now: str | None = None, timed: bool = True) -> Decision:
+    def decide(self, run_id: str, row_id: str, slot: int, reviewer: str, decision: str, comment: str = "", override_classification: str | None = None, blind: bool = False, now: str | None = None, timed: bool = True, *, commit: bool = True) -> Decision:
         if slot not in (1, 2):
             raise ValueError("reviewer slot must be 1 or 2")
         if decision not in DECISIONS:
@@ -110,17 +110,19 @@ class ReviewStore:
             d = Decision(slot, reviewer, decision, comment or "", override_classification, decided_at, bool(blind), seconds)
             self.conn.execute("INSERT OR REPLACE INTO decisions (run_id, row_id, reviewer_slot, reviewer_name, decision, comment, decided_at, blind, override_classification, seconds_spent) VALUES (?,?,?,?,?,?,?,?,?,?)", (run_id, row_id, slot, reviewer, decision, d.comment, d.decided_at, int(d.blind), override_classification or "", seconds))
             self.db.audit(reviewer, f"review.decision.slot{slot}", f"{run_id} {row_id}: {decision}{' → ' + override_classification if override_classification else ''}{' [blind]' if blind else ''} {comment}".strip())
-            self.conn.commit()
+            if commit:
+                self.conn.commit()
         return d
 
-    def finalize(self, run_id: str, row_id: str, final_decision: str, by: str, note: str = "") -> Final:
+    def finalize(self, run_id: str, row_id: str, final_decision: str, by: str, note: str = "", *, commit: bool = True) -> Final:
         if final_decision not in DECISIONS:
             raise ValueError(f"final decision must be one of {DECISIONS}")
         f = Final(final_decision, by, _now(), note or "")
         with self.db.lock:
-            self.conn.execute("INSERT OR REPLACE INTO finals VALUES (?,?,?,?,?,?)", (run_id, row_id, final_decision, by, f.finalized_at, f.note))
+            self.conn.execute("INSERT OR REPLACE INTO finals (run_id,row_id,final_decision,finalized_by,finalized_at,note) VALUES (?,?,?,?,?,?)", (run_id, row_id, final_decision, by, f.finalized_at, f.note))
             self.db.audit(by, "review.final", f"{run_id} {row_id}: {final_decision} {note}".strip())
-            self.conn.commit()
+            if commit:
+                self.conn.commit()
         return f
 
     def decisions(self, run_id: str, row_id: str) -> dict[int, Decision]:

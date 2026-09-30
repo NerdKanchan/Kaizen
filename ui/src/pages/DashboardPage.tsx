@@ -1,12 +1,13 @@
 import { ArrowRight, Certificate, CheckCircle, FileXls, GitDiff, ShieldWarning, Warning } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { RunSharing } from "../components/RunSharing";
 import { api } from "../api";
 import { Badge, ClassificationBadge, SeverityBadge, StateBadge } from "../components/Badges";
 import { ErrorBox, Loading } from "../components/Feedback";
 import { Bar, CLASS_COLORS, Stat } from "../components/Stat";
 import { AnchorButton, Button, Card, CardHead, LinkButton, PageHeader, Skeleton } from "../components/ui";
-import { enc, fmtBytes, fmtDate, shortSha } from "../lib/format";
+import { enc, fmtBytes, fmtDate, issueLabel, shortSha } from "../lib/format";
 import { useReviewer } from "../lib/reviewer";
 import { useToast } from "../lib/toast";
 import { errorMessage, useAsync } from "../lib/useAsync";
@@ -50,9 +51,9 @@ export default function DashboardPage() {
   }
   const typeRows = [...byType.entries()].sort((a, b) => SEV_RANK[a[1].top] - SEV_RANK[b[1].top] || b[1].count - a[1].count);
   const coverageIssues = r.coverage.filter((c) => c.status !== "OK");
-  const untouched = rows.filter((x) => x.state === "ENGINE_RECOMMENDED").length;
   const reviewable = r.reviewable_rows ?? r.rows;
   const headerNeeds = r.header_rows_needing_validation ?? 0;
+  const flagged = nv.data?.total ?? r.needs_validation + headerNeeds;
   const disagreements = r.state_counts.DISAGREEMENT ?? 0;
   const clearedPct = reviewable ? Math.round((100 * r.auto_cleared) / reviewable) : 0;
   const verdict = r.blockers > 0 ? { tone: "bad" as const, label: "Blocked", icon: <ShieldWarning size={14} weight="fill" /> } : r.needs_validation > 0 ? { tone: "warn" as const, label: "Needs review", icon: <Warning size={14} weight="fill" /> } : { tone: "ok" as const, label: "Cleared", icon: <CheckCircle size={14} weight="fill" /> };
@@ -76,7 +77,7 @@ export default function DashboardPage() {
       <PageHeader
         title={
           <>
-            <span className="mono text-xl whitespace-nowrap">{r.run_id}</span>
+            <span>{r.name || "Overview"}</span>
             <Badge tone={verdict.tone} dot={false} size="md">
               {verdict.icon}
               {verdict.label}
@@ -86,45 +87,49 @@ export default function DashboardPage() {
         meta={
           <>
             <span>{fmtDate(r.timestamp)}</span>
-            <span>tool {r.tool_version}</span>
-            <span>
-              terminology <span className="mono" title={r.terminology_version}>{shortSha(r.terminology_version)}</span> · {r.terminology_count} relationships
-            </span>
+            <span>{r.skus} SKUs</span>
+            <span>{r.documents} documents</span>
             {/* The input folder is deliberately not shown here: it is the widest thing on the line,
                 a reviewer never needs it mid-review, and it is an absolute local path. It stays
                 recorded in the workbook's run-info sheet and on the certificate. */}
           </>
         }
-        actions={
-          <>
-            <Button variant="ghost" onClick={doVerify} loading={verifying} title="Match open action items from earlier runs against this run's results">
+        description="Results and review status for this run."
+      />
+      <section className="review-next" aria-label="Next step">
+        <div><h2>{flagged ? "Comparisons needing review" : "Results"}</h2><p>{flagged ? `${flagged} comparisons were flagged by the engine. Open the queue to see their review status and supporting evidence.` : "No comparisons were flagged by the engine. You can still inspect the results and evidence."}</p></div>
+        <LinkButton variant="primary" to={queue({})} iconRight={<ArrowRight size={16} />}>{r.permission === "view" ? "View comparisons" : "Review comparisons"}</LinkButton>
+      </section>
+      <details className="run-management">
+        <summary>Run settings and exports</summary>
+        <RunSharing key={runId} run={r} onChanged={run.reload} />
+        <div className="flex flex-wrap gap-2 pb-3">
+            <Button disabled={r.permission === "view"} variant="ghost" onClick={doVerify} loading={verifying} title="Check action items belonging to this run">
               Verify and close
             </Button>
             <LinkButton to={`${base}/diff`} icon={<GitDiff size={16} />} title="Resolved, new and still-open discrepancies against an earlier run">
               Compare runs
             </LinkButton>
+            {r.permission !== "view" && <>
             <AnchorButton href={api.certificateUrl(runId)} download icon={<Certificate size={16} />} title="One page per SKU: run id, file hashes, counts, named reviewers, open action items">
               Certificate
             </AnchorButton>
             <AnchorButton href={api.exportUrl(runId)} download icon={<FileXls size={16} />}>
               Export workbook
             </AnchorButton>
-            <LinkButton variant="primary" to={queue({})} iconRight={<ArrowRight size={16} />}>
-              Open review queue
-            </LinkButton>
-          </>
-        }
-      />
+            </>}
+        </div>
+      </details>
 
       <div className="space-y-5 stagger">
         {verifyErr && <ErrorBox error={verifyErr} />}
         {verify && (
           <Card>
-            <CardHead title="Verify and close" description="Open action items matched against this run by comparison key, not by file name." />
+            <CardHead title="Verify and close" description="Check whether this run resolves any open action items." />
             <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-line">
-              <Outcome tone="ok" label="Resolved" ids={verify.resolved} note="The discrepancy is no longer present; the item is marked resolved in this run." />
-              <Outcome tone="bad" label="Still open" ids={verify.still_open} note="The same comparison still shows the discrepancy." />
-              <Outcome tone="neutral" label="Not covered" ids={verify.not_covered} note="This run has no comparison for the item (different SKU set)." />
+              <Outcome tone="ok" label="Resolved" ids={verify.resolved} note="No longer reported in this run." />
+              <Outcome tone="bad" label="Still open" ids={verify.still_open} note="Still reported in this run." />
+              <Outcome tone="neutral" label="Not covered" ids={verify.not_covered} note="No matching comparison in this run." />
             </div>
           </Card>
         )}
@@ -133,21 +138,20 @@ export default function DashboardPage() {
         <Card>
           <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-line">
             <div className="p-5">
-              <div className="text-sm font-medium text-ink-2">Auto-cleared by the engine</div>
+              <div className="text-sm font-medium text-ink-2">Auto-cleared</div>
               <div className="flex items-baseline gap-3 mt-1">
                 <span className="num text-4xl font-semibold text-ok-strong">{r.auto_cleared}</span>
                 <span className="text-sm text-ink-3">{clearedPct}% of {reviewable} reviewable</span>
               </div>
               <p className="text-sm text-ink-3 mt-2">
-                Exact or equivalent with no discrepancy. Still recorded and auditable:{" "}
-                <Link to={queue({ nv: "0", classification: "EXACT" })}>inspect them</Link>.
+                Matches with no reported discrepancy. <Link to={queue({ nv: "0", classification: "EXACT" })}>View exact matches</Link>.
               </p>
             </div>
             <div className="p-5">
-              <div className="text-sm font-medium text-ink-2">Needs human review</div>
+              <div className="text-sm font-medium text-ink-2">Needs review</div>
               <div className="flex items-baseline gap-3 mt-1">
                 <span className="num text-4xl font-semibold text-bad-strong">{r.needs_validation}</span>
-                <span className="text-sm text-ink-3">{nv.data ? `${untouched} not yet opened` : "…"}</span>
+                <span className="text-sm text-ink-3">{reviewable ? Math.round((100 * r.needs_validation) / reviewable) : 0}% of {reviewable} reviewable</span>
               </div>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 <Badge tone={r.blockers ? "bad" : "neutral"}>
@@ -162,8 +166,8 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="px-5 pb-5 pt-1">
-            <Bar key={r.run_id} animate height={12} segments={[{ label: "Auto-cleared", value: r.auto_cleared, color: CLASS_COLORS.EXACT }, { label: "Needs human review", value: r.needs_validation, color: CLASS_COLORS.MISMATCH }]} />
-            {(r.exempt_rows ?? 0) > 0 && <p className="text-xs text-ink-3 mt-2">Not counted above: {r.exempt_rows} exempt rows (non-physical BOM lines such as labels and process steps), listed in the queue and the workbook for traceability.</p>}
+            <Bar key={r.run_id} animate height={12} segments={[{ label: "Auto-cleared", value: r.auto_cleared, color: CLASS_COLORS.EXACT }, { label: "Needs review", value: r.needs_validation, color: CLASS_COLORS.MISMATCH }]} />
+            {(r.exempt_rows ?? 0) > 0 && <p className="text-xs text-ink-3 mt-2">Excludes {r.exempt_rows} exempt rows, such as labels and process steps. These remain in the queue and exported workbook.</p>}
           </div>
         </Card>
 
@@ -172,13 +176,13 @@ export default function DashboardPage() {
           <Stat label="Documents" value={r.documents} sub={DOC_TYPES.map((t) => `${t} ${r.documents_by_type[t] ?? 0}`).join(" · ")} />
           <Stat label="Comparisons" value={r.rows} sub={r.reviewable_rows !== undefined ? `${r.reviewable_rows} reviewable · ${r.exempt_rows ?? 0} exempt` : undefined} />
           <Stat label="Blockers" value={r.blockers} tone={r.blockers ? "bad" : "good"} />
-          <Stat label="Coverage issues" value={coverageIssues.length} tone={coverageIssues.length ? "bad" : "good"} sub="a BOM for every PCO affected code" />
+          <Stat label="Coverage issues" value={coverageIssues.length} tone={coverageIssues.length ? "bad" : "good"} sub="Missing or incomplete SKU sets" />
           <Stat label="Unrecognised files" value={r.unrecognised_files.length} tone={r.unrecognised_files.length ? "warn" : "neutral"} />
         </div>
 
         <div className="grid xl:grid-cols-2 gap-5">
           <Card>
-            <CardHead title="Open discrepancies by type" count={nv.loading ? "counting…" : `${unresolved.length} rows not finalized`} />
+            <CardHead title="Open discrepancies" count={nv.loading ? "Loading…" : `${unresolved.length} comparisons awaiting approval`} />
             {nv.error && (
               <div className="p-4">
                 <ErrorBox error={nv.error} onRetry={nv.reload} />
@@ -207,7 +211,7 @@ export default function DashboardPage() {
                         <td>
                           <SeverityBadge value={v.top} />
                         </td>
-                        <td className="mono">{t}</td>
+                        <td title={t}>{issueLabel(t)}</td>
                         <td className="text-right num font-medium">{v.count}</td>
                         <td className="text-right">
                           <Link to={queue({ discrepancy: t, nv: "0" })}>open</Link>
@@ -235,7 +239,7 @@ export default function DashboardPage() {
 
           <div className="space-y-5">
             <Card>
-              <CardHead title="Engine classification" count={`${r.rows} comparisons`} />
+              <CardHead title="Automated results" count={`${r.rows} comparisons`} />
               <div className="p-5">
                 <Bar segments={CLASSIFICATIONS.map((c) => ({ label: c, value: r.counts[c] ?? 0, color: CLASS_COLORS[c] }))} />
                 <div className="flex flex-wrap gap-1.5 mt-3">
@@ -267,7 +271,7 @@ export default function DashboardPage() {
                 </div>
               </Card>
               <Card>
-                <CardHead title="Review state" />
+                <CardHead title="Review status" />
                 <div className="overflow-x-auto">
                   <table className="tbl">
                     <tbody>
@@ -292,7 +296,7 @@ export default function DashboardPage() {
 
         <div className="grid xl:grid-cols-2 gap-5">
           <Card>
-            <CardHead title="PCO coverage and SKU sets" count={`${coverageIssues.length} issue${coverageIssues.length === 1 ? "" : "s"}`} />
+            <CardHead title="Document coverage" count={`${coverageIssues.length} issue${coverageIssues.length === 1 ? "" : "s"}`} />
             <div className="max-h-80 overflow-auto">
               <div className="overflow-x-auto">
                 {/* A min width so the card scrolls sideways instead of squeezing `source` down to
@@ -328,9 +332,9 @@ export default function DashboardPage() {
             </div>
           </Card>
           <Card>
-            <CardHead title="Parser warnings" count={r.parser_warnings.reduce((n, p) => n + p.warnings.length, 0)} />
+            <CardHead title="Extraction warnings" count={r.parser_warnings.reduce((n, p) => n + p.warnings.length, 0)} />
             {r.parser_warnings.length === 0 ? (
-              <div className="p-5 text-sm text-ink-3">No parser warnings. Every document was read without a caveat.</div>
+              <div className="p-5 text-sm text-ink-3">No extraction warnings.</div>
             ) : (
               <div className="max-h-80 overflow-auto">
                 <div className="overflow-x-auto">
@@ -380,8 +384,9 @@ export default function DashboardPage() {
               <span className="ml-auto text-xs text-ink-3 group-open:hidden">show</span>
               <span className="ml-auto text-xs text-ink-3 hidden group-open:inline">hide</span>
             </summary>
-            <div className="p-5 grid lg:grid-cols-2 gap-6 text-sm">
+            <div className="run-record-details p-5 grid lg:grid-cols-2 gap-6 text-sm">
               <div className="space-y-5">
+                <dl className="kv"><dt>Run ID</dt><dd className="mono">{r.run_id}</dd><dt>Tool version</dt><dd>{r.tool_version}</dd><dt>Terminology version</dt><dd className="mono">{shortSha(r.terminology_version)}</dd><dt>Relationships</dt><dd>{r.terminology_count}</dd></dl>
                 <div>
                   <div className="text-sm font-medium mb-2">SKU groups ({r.groups.length})</div>
                   <div className="overflow-x-auto">

@@ -54,9 +54,9 @@ export default function DiffPage() {
   return (
     <div>
       <PageHeader
-        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
+        back={{ to: `/runs/${enc(runId)}`, label: "Overview" }}
         title="Compare runs"
-        description="After corrected documents come back, this shows only what moved. Rows are matched by their comparison key, so a row that was renumbered still lines up."
+        description="Compare this run with an earlier run to see new, resolved and remaining discrepancies."
         meta={
           <>
             <span>
@@ -96,8 +96,7 @@ export default function DiffPage() {
 
       <div className="space-y-5 stagger">
         <Notice>
-          Rows are matched across runs by their comparison key (check, SKU and item), not by row id. <b>Resolved</b> means the discrepancy is no longer reported; <b>gone</b> means the comparison itself disappeared, which is not the same as
-          fixed. Action items close through "Verify and close" on the dashboard; this page only shows the change.
+          <b>Resolved</b>: the discrepancy is no longer reported. <b>Gone</b>: the comparison was removed. To close related action items, use “Verify and close” in the run overview.
         </Notice>
 
         {runs.error && <ErrorBox error={runs.error} onRetry={runs.reload} />}
@@ -108,16 +107,16 @@ export default function DiffPage() {
             {others.length === 0 && runs.data ? (
               <EmptyState
                 icon={<GitDiff size={36} />}
-                title="There is no other run to compare against"
-                description="This workspace holds one run. Run the corrected documents, then come back and pick the earlier run."
+                title="A second run is needed"
+                description="Create another run, then select which results to compare."
                 action={
                   <LinkButton to="/" iconRight={<ArrowRight size={16} />}>
-                    Go to runs
+                    All runs
                   </LinkButton>
                 }
               />
             ) : (
-              <EmptyState icon={<GitDiff size={36} />} title="Choose an earlier run" description="Pick the run recorded before the corrected documents arrived. Only the comparisons that moved are listed." />
+              <EmptyState icon={<GitDiff size={36} />} title="Choose an earlier run" description="Select a run to see what changed." />
             )}
           </Card>
         )}
@@ -185,7 +184,7 @@ export default function DiffPage() {
                 <EmptyState
                   icon={<CheckCircle size={36} />}
                   title="Nothing moved between these runs"
-                  description="Every comparison the two runs share carries the same classification and the same discrepancies. Nothing was resolved and nothing is new."
+                  description="The shared comparisons have the same classifications and discrepancies."
                 />
               </Card>
             )}

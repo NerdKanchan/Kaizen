@@ -7,7 +7,7 @@ import { ConfirmDialog, ErrorBox, Loading } from "../components/Feedback";
 import { HotkeyHelp, HotkeyHint } from "../components/HotkeyHelp";
 import { ImportDecisions } from "../components/ImportDecisions";
 import { Button, Card, EmptyState, PageHeader, TableSkeleton } from "../components/ui";
-import { displayName, enc, fmtQty } from "../lib/format";
+import { displayName, enc, fmtQty, issueLabel } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { PAGE_SIZE, queueParams, queueQueryFromParams } from "../lib/queue";
 import { useReviewer } from "../lib/reviewer";
@@ -16,7 +16,7 @@ import { errorMessage, useAsync } from "../lib/useAsync";
 import { CHECK_TYPES, CLASSIFICATIONS, DISCREPANCY_TYPES, REVIEW_STATES, ROLES, SEVERITIES, type ResultRow, type SideSummary } from "../types";
 
 const CHECK_LABEL: Record<string, string> = { BOM_LABEL: "BOM to label", BOM_DRAWING: "BOM to drawing", LABEL_DRAWING: "Label to drawing", PCO_BOM: "PCO to BOM", LABEL_REVISION: "Label revision" };
-const STATE_LABEL: Record<string, string> = { ENGINE_RECOMMENDED: "Engine recommended", REVIEWER_1_COMPLETE: "Reviewer 1 done", REVIEWER_2_COMPLETE: "Reviewer 2 done", AGREED: "Agreed", DISAGREEMENT: "Disagreement", FINALIZED: "Finalized" };
+const STATE_LABEL: Record<string, string> = { REVIEWED: "Reviewed", ENGINE_RECOMMENDED: "Not reviewed", REVIEWER_1_COMPLETE: "Reviewer 1 done", REVIEWER_2_COMPLETE: "Reviewer 2 done", AGREED: "Agreed", DISAGREEMENT: "Disagreement", FINALIZED: "Approved" };
 const title = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
 
 export default function ReviewQueuePage() {
@@ -24,8 +24,7 @@ export default function ReviewQueuePage() {
   const [sp, setSp] = useSearchParams();
   const nav = useNavigate();
   const toast = useToast();
-  const { session, viewerParams, name } = useReviewer();
-  const slot: 1 | 2 = session?.slot ?? 1;
+  const { viewerParams, name } = useReviewer();
   const run = useAsync(() => api.getRun(runId), [runId]);
   const query = queueQueryFromParams(sp, viewerParams);
   const page = useAsync(() => api.getResults(runId, query), [runId, sp.toString(), viewerParams.viewer, viewerParams.blind]);
@@ -77,12 +76,8 @@ export default function ReviewQueuePage() {
     setBulkCount(null);
     setBulkErr(null);
     try {
-      const other = slot === 1 ? "REVIEWER_2_COMPLETE" : "REVIEWER_1_COMPLETE";
-      const [a, b] = await Promise.all([
-        api.getResults(runId, { needs_validation: false, state: "ENGINE_RECOMMENDED", limit: 1 }),
-        api.getResults(runId, { needs_validation: false, state: other, limit: 1 }),
-      ]);
-      setBulkCount(a.total + b.total);
+      const result = await api.getResults(runId, { needs_validation: false, state: "ENGINE_RECOMMENDED", limit: 1 });
+      setBulkCount(result.total);
     } catch (e) {
       setBulkErr(errorMessage(e));
     }
@@ -127,20 +122,20 @@ export default function ReviewQueuePage() {
     <div>
       <HotkeyHelp open={help} onClose={() => setHelp(false)} />
       <PageHeader
-        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
+        back={{ to: `/runs/${enc(runId)}`, label: "Overview" }}
         title="Review queue"
-        description="Ordered by the engine: blockers, then major, ambiguous, potential and low-confidence rows. Open a row to see both documents and decide."
+        description="Open a comparison to review the documents and save a decision."
         meta={<HotkeyHint />}
         actions={
           <>
-            <ImportDecisions
+            {run.data?.permission !== "view" && <ImportDecisions
               runId={runId}
               onApplied={() => {
                 page.reload();
                 run.reload();
               }}
-            />
-            <Button onClick={openBulk} disabled={!name} icon={<CheckSquare size={16} />} title={name ? "" : "Sign in first"}>
+            />}
+            <Button onClick={openBulk} disabled={!name || run.data?.permission === "view"} icon={<CheckSquare size={16} />} title={name ? "" : "Sign in first"}>
               Accept all clean rows
             </Button>
           </>
@@ -152,13 +147,9 @@ export default function ReviewQueuePage() {
           <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
             {sel("sku", "SKU", (run.data?.groups ?? []).map((g) => g.sku))}
             {sel("check", "Check", CHECK_TYPES, (c) => CHECK_LABEL[c] ?? c)}
-            {sel("discrepancy", "Discrepancy", DISCREPANCY_TYPES, (d) => d.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()))}
-            {sel("severity", "Severity", SEVERITIES, title)}
-            {sel("classification", "Classification", CLASSIFICATIONS, title)}
-            {sel("state", "State", REVIEW_STATES, (s) => STATE_LABEL[s] ?? s)}
-            {sel("role", "Role", ROLES, title)}
+            {sel("state", "Review status", REVIEW_STATES, (s) => STATE_LABEL[s] ?? s)}
             <form
-              className="flex items-end gap-1.5"
+              className="flex items-end gap-1.5 max-w-full"
               onSubmit={(e) => {
                 e.preventDefault();
                 set("q", search.trim());
@@ -168,16 +159,16 @@ export default function ReviewQueuePage() {
                 Search
                 <span className="relative">
                   <MagnifyingGlass size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-                  <input className="input input-sm pl-8 w-56" placeholder="Item, description, explanation" value={search} onChange={(e) => setSearch(e.target.value)} />
+                  <input className="input input-sm pl-8 w-full" placeholder="Item, description, explanation" value={search} onChange={(e) => setSearch(e.target.value)} />
                 </span>
               </label>
               <Button size="sm" type="submit">
                 Search
               </Button>
             </form>
-            <label className="flex items-center gap-2 text-sm h-8 select-none" title="On: only rows the engine could not clear. Off: every comparison, including auto-cleared rows.">
+            <label className="flex items-center gap-2 text-sm h-8 select-none" title="Show only comparisons flagged for review.">
               <input type="checkbox" className="accent-accent-500 w-4 h-4" checked={nvOn} onChange={(e) => set("nv", e.target.checked ? "" : "0")} />
-              Needs validation only
+              Flagged only
             </label>
             {activeFilters > 0 && (
               <Button size="sm" variant="ghost" onClick={clear} icon={<X size={14} />}>
@@ -190,6 +181,14 @@ export default function ReviewQueuePage() {
               </Badge>
             )}
           </div>
+          <details className="queue-more-filters" open={["discrepancy", "severity", "classification", "role"].some(k => sp.get(k)) || undefined}>
+            <summary>More filters{["discrepancy", "severity", "classification", "role"].some(k => sp.get(k)) ? " · active" : ""}</summary>
+            <div className="flex flex-wrap gap-3 pt-3">            {sel("discrepancy", "Discrepancy", DISCREPANCY_TYPES, issueLabel)}
+            {sel("severity", "Severity", SEVERITIES, title)}
+            {sel("classification", "Classification", CLASSIFICATIONS, title)}
+            {sel("role", "Role", ROLES, title)}
+</div>
+          </details>
         </Card>
 
         {page.error && <ErrorBox error={page.error} onRetry={page.reload} />}
@@ -213,7 +212,7 @@ export default function ReviewQueuePage() {
           </div>
           {page.loading && !page.data && <TableSkeleton rows={8} cols={7} />}
           {page.data && page.data.rows.length === 0 && (
-            <EmptyState icon={<ListChecks size={36} />} title="No rows match these filters" description={nvOn ? "Every comparison matching the other filters was auto-cleared. Turn off “Needs validation only” to see them." : "Try fewer filters."} action={activeFilters > 0 ? <Button onClick={clear}>Clear filters</Button> : undefined} />
+            <EmptyState icon={<ListChecks size={36} />} title="No rows match these filters" description={nvOn ? "Every comparison matching the other filters was auto-cleared. Turn off “Flagged only” to see them." : "Try fewer filters."} action={activeFilters > 0 ? <Button onClick={clear}>Clear filters</Button> : undefined} />
           )}
           {page.data && page.data.rows.length > 0 && (
             <div className="overflow-x-auto">
@@ -224,7 +223,7 @@ export default function ReviewQueuePage() {
                     <th>SKU · check</th>
                     <th>Side A</th>
                     <th>Side B</th>
-                    <th>Engine</th>
+                    <th>Result</th>
                     <th>Discrepancies</th>
                     <th>Review</th>
                   </tr>
@@ -236,7 +235,7 @@ export default function ReviewQueuePage() {
                         <SeverityBadge value={row.engine.severity} />
                       </td>
                       <td className="whitespace-nowrap">
-                        <div className="mono font-medium">{row.sku}</div>
+                        <Link className="mono font-medium underline" to={`/runs/${enc(runId)}/rows/${enc(row.row_id)}?${queueParams(sp).toString()}`} onClick={e => e.stopPropagation()} aria-label={`Review ${row.sku} ${CHECK_LABEL[row.check] ?? row.check} comparison ${offset + i + 1}`}>{row.sku}</Link>
                         <div className="text-xs text-ink-3 mt-0.5 flex items-center gap-1.5">
                           {CHECK_LABEL[row.check] ?? row.check} <RoleTag value={row.role} />
                         </div>
@@ -248,7 +247,7 @@ export default function ReviewQueuePage() {
                         <Side s={row.b} />
                       </td>
                       <td className="whitespace-nowrap">
-                        <ClassificationBadge value={row.engine.classification} title="Engine recommendation" />
+                        <ClassificationBadge value={row.engine.classification} title="Automated result" />
                         {row.effective_classification !== row.engine.classification && (
                           <div className="text-xs text-ink-3 mt-1 flex items-center gap-1">
                             reviewer <ClassificationBadge value={row.effective_classification} />
@@ -260,7 +259,7 @@ export default function ReviewQueuePage() {
                         <div className="flex flex-wrap gap-1 max-w-[12rem]">
                           {row.engine.discrepancies.map((t) => (
                             <span key={t} className="chip">
-                              {t.replace(/_/g, " ").toLowerCase()}
+                              {issueLabel(t)}
                             </span>
                           ))}
                         </div>
@@ -283,7 +282,7 @@ export default function ReviewQueuePage() {
       {bulkOpen && (
         <ConfirmDialog title="Accept all clean rows" confirmLabel={bulkCount ? `Accept ${bulkCount} rows` : "Accept"} onConfirm={doBulk} onCancel={() => setBulkOpen(false)} busy={bulkBusy || bulkCount === null}>
           <p>
-            Records an <b>Accept</b> decision as <b title={name}>{displayName(name)}</b> (reviewer {slot}) on every row that has no discrepancy and does not need validation. Rows you already decided are skipped.
+            Records an <b>Accept</b> decision as <b title={name}>{displayName(name)}</b> on every row that has no discrepancy and does not need validation. Rows you already decided are skipped.
           </p>
           {bulkCount === null && !bulkErr && <Loading lines={2} />}
           {bulkCount !== null && (
@@ -327,16 +326,16 @@ function Decisions({ row, blind }: { row: ResultRow; blind: boolean }) {
   return (
     <div className="space-y-0.5 text-ink-2">
       <div>
-        <span className="text-ink-3 inline-block w-8">R1</span>
+        <span className="text-ink-3 inline-block w-8">Review</span>
         {blind && !d2 && !d1 ? <span className="text-brand-600">hidden (blind)</span> : fmt(d1)}
       </div>
-      <div>
-        <span className="text-ink-3 inline-block w-8">R2</span>
+      {d2 && <div>
+        <span className="text-ink-3 inline-block w-8">Earlier</span>
         {fmt(d2)}
-      </div>
+      </div>}
       {row.final && (
         <div>
-          <span className="text-ink-3 inline-block w-8">Final</span>
+          <span className="text-ink-3 mr-2">{row.final.self_approved ? "Self-approved" : "Approved"}</span>
           {row.final.final_decision.replace(/_/g, " ").toLowerCase()} · {row.final.finalized_by}
         </div>
       )}

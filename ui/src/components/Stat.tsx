@@ -11,13 +11,13 @@ export const BAD_COLOR = c("bad");
 export function Stat({ label, value, sub, tone = "neutral", icon, className = "", size = "md" }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "neutral" | "good" | "warn" | "bad" | "brand"; icon?: ReactNode; className?: string; size?: "md" | "lg" }) {
   const tones = { neutral: "text-ink", good: "text-ok-strong", warn: "text-warn-strong", bad: "text-bad-strong", brand: "text-brand-700" };
   return (
-    <div className={`card px-4 py-3 ${className}`}>
-      <div className="flex items-center gap-1.5 text-xs font-medium text-ink-2">
+    <div className={`card stat-card ${className}`}>
+      <div className="stat-label flex items-center gap-1.5 text-xs font-medium text-ink-2">
         {icon && <span className="text-ink-3">{icon}</span>}
         {label}
       </div>
-      <div className={`num font-semibold tracking-tight leading-none mt-1.5 ${size === "lg" ? "text-3xl" : "text-2xl"} ${tones[tone]}`}>{value}</div>
-      {sub && <div className="text-xs text-ink-3 mt-1.5 leading-4">{sub}</div>}
+      <div className={`stat-value num font-semibold tracking-tight leading-none mt-1.5 ${size === "lg" ? "text-3xl" : "text-2xl"} ${tones[tone]}`}>{value}</div>
+      {sub && <div className="stat-note text-xs text-ink-3 mt-1.5 leading-4">{sub}</div>}
     </div>
   );
 }

@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: kaizen
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: kaizen-data
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: KAIZEN_ADMIN_EMAIL
+        value: rahulreddy.basireddy@bd.com
+      - key: KAIZEN_ADMIN_PASSWORD
+        sync: false
+      - key: KAIZEN_WORKSPACE
+        value: /var/data/kaizen
+      - key: KAIZEN_HOSTED
+        value: "1"
+      - key: KAIZEN_SECURE_COOKIES
+        value: "1"

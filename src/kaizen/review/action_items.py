@@ -118,7 +118,7 @@ class ActionItemStore:
             self.conn.commit()
         return self.get(ai_id)
 
-    def verify_and_close(self, run: Run, by: str = "system") -> VerifyOutcome:
+    def verify_and_close(self, run: Run, by: str = "system", allowed_run_ids: set[str] | None = None) -> VerifyOutcome:
         """After a corrective rerun: an open item is RESOLVED when the run covers its SKU and no row with the
         same comparison key still carries a non-informational discrepancy."""
         outcome = VerifyOutcome(run.metadata.run_id)
@@ -128,6 +128,8 @@ class ActionItemStore:
             k = comparison_key(r)
             open_keys[k] = open_keys.get(k, False) or any(d.severity is not Severity.INFO for d in r.discrepancies)
         for ai in self.list():
+            if allowed_run_ids is not None and ai.run_id not in allowed_run_ids:
+                continue
             if ai.status not in ("OPEN", "IN_PROGRESS"):
                 continue
             if ai.sku not in covered:

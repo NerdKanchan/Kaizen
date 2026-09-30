@@ -53,16 +53,16 @@ export default function MiningPage() {
   return (
     <div>
       <PageHeader
-        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
-        title="Worklist and mining"
-        description="Wording pairings the engine matched only by similarity, repeated across SKUs in this run. Approve one and it becomes a versioned relationship, so the next run clears those rows on its own."
+        back={{ to: `/runs/${enc(runId)}`, label: "Overview" }}
+        title="Suggested matches"
+        description="Review similar terms found across SKUs and save confirmed matches to terminology."
       />
 
       <div className="space-y-5 stagger">
         {worklist.error && <ErrorBox error={worklist.error} onRetry={worklist.reload} />}
         {worklist.loading && !worklist.data && (
           <Card>
-            <CardHead icon={<ListChecks size={18} />} title="Terminology worklist" />
+            <CardHead icon={<ListChecks size={18} />} title="Matches to review" />
             <TableSkeleton rows={5} cols={7} />
           </Card>
         )}
@@ -87,13 +87,12 @@ export default function MiningPage() {
               </label>
             }
           >
-            Mining suggestions
+            Repeated matches
           </SectionTitle>
 
           <div className="space-y-4">
             <Notice>
-              Human approval is required; nothing is created automatically. Approving creates a versioned relationship with provenance “learned” that the next run applies. Rejecting records the
-              pair so it is not suggested again.
+              Approve a match to save it as terminology for future runs. Rejected pairs won’t be suggested again.
             </Notice>
             {list.error && <ErrorBox error={list.error} onRetry={list.reload} />}
             {list.loading && !list.data && (
@@ -106,7 +105,7 @@ export default function MiningPage() {
                 <EmptyState
                   icon={<Lightbulb size={36} />}
                   title="No suggestions at this threshold"
-                  description="Every repeated pairing is already covered by a relationship, or was rejected. Lower the SKU threshold above to see pairings seen in fewer SKUs."
+                  description="Lower the minimum SKU count to see more suggestions."
                 />
               </Card>
             )}
@@ -126,7 +125,8 @@ export default function MiningPage() {
 
 /** The business-case projection as a to-do list: approve these, in this order, and this many rows clear. */
 function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; onDone: () => void }) {
-  const { name } = useReviewer();
+  const { name, session } = useReviewer();
+  const accessRun = useAsync(() => api.getRun(runId), [runId]);
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -153,22 +153,22 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
     <Card>
       <CardHead
         icon={<ListChecks size={18} />}
-        title="Terminology worklist"
+        title="Matches to review"
         count={wl.items.length > 0 ? `${wl.items.length} pairing${wl.items.length === 1 ? "" : "s"}` : undefined}
         description={
           <>
-            <span className="num">{wl.needs_validation}</span> rows need validation in this run; <span className="num">{wl.potential_rows}</span> of them sit behind unconfirmed wording pairings.
+            <span className="num">{wl.needs_validation}</span> comparisons need review in this run; <span className="num">{wl.potential_rows}</span> have suggested terminology matches.
           </>
         }
       />
       {wl.items.length === 0 ? (
         <EmptyState
           icon={<CheckCircle size={36} />}
-          title="Nothing left to approve"
-          description="Every fuzzy pairing in this run is already covered by a relationship. The rows that still need validation carry a real discrepancy, so work them in the review queue."
+          title="No matches to approve"
+          description="Check the review queue for any remaining discrepancies."
           action={
             <LinkButton variant="primary" to={`/runs/${enc(runId)}/review`}>
-              Open review queue
+              Review comparisons
             </LinkButton>
           }
         />
@@ -176,19 +176,17 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
         <>
           <div className="px-4 py-4 border-b border-line">
             <p className="text-lg text-ink max-w-[70ch]">
-              Approving the top <span className="num font-semibold">{wl.top5.n}</span> pairings auto-clears <span className="num font-semibold">{wl.top5.rows}</span> rows (
-              <span className="num font-semibold">{wl.top5.pct}%</span> of what needs validation).
+              Confirming the top <span className="num font-semibold">{wl.top5.n}</span> matches could clear <span className="num font-semibold">{wl.top5.rows}</span> comparisons in future runs (<span className="num font-semibold">{wl.top5.pct}%</span> of the current review queue).
             </p>
             <p className="text-sm text-ink-3 mt-1.5 max-w-[80ch]">
-              The top {wl.top10.n} clears <span className="num">{wl.top10.rows}</span> rows (<span className="num">{wl.top10.pct}%</span>). Each approval creates a versioned relationship that the
-              next run applies. Rows counted as “still review” carry a discrepancy or an ambiguity and stay with a reviewer regardless.
+              The top {wl.top10.n} matches cover {wl.top10.rows} comparisons ({wl.top10.pct}%). Comparisons with discrepancies or ambiguous matches still need review.
             </p>
             <div className="mt-3 max-w-[46rem]">
               <Bar
                 height={12}
                 segments={[
                   { label: `Clears with the top ${wl.top5.n}`, value: wl.top5.rows, color: CLASS_COLORS.EQUIVALENT },
-                  { label: "Still needs a person", value: remaining, color: CLASS_COLORS.MISMATCH },
+                  { label: "Still needs review", value: remaining, color: CLASS_COLORS.MISMATCH },
                 ]}
               />
             </div>
@@ -243,7 +241,7 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
                           size="sm"
                          
                           loading={busy === it.pair_key}
-                          disabled={busy !== null || !name}
+                          disabled={busy !== null || !name || !session?.is_admin || accessRun.data?.permission === "view"}
                           onClick={() => approve(it)}
                           title="Creates a global relationship, versioned and attributed to you"
                         >
@@ -270,7 +268,8 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
 }
 
 function SuggestionCard({ runId, s, onDone }: { runId: string; s: MiningSuggestion; onDone: () => void }) {
-  const { name } = useReviewer();
+  const { name, session } = useReviewer();
+  const accessRun = useAsync(() => api.getRun(runId), [runId]);
   const toast = useToast();
   const uid = useId();
   const families = [...new Set(s.skus.map(familyOf))];
@@ -413,7 +412,7 @@ function SuggestionCard({ runId, s, onDone }: { runId: string; s: MiningSuggesti
                 <Field label="Notes" hint="Why this pairing is right." htmlFor={`${uid}-notes`}>
                   <input id={`${uid}-notes`} className="input w-full" value={notes} onChange={(e) => setNotes(e.target.value)} />
                 </Field>
-                <Button variant="primary" className="w-full" icon={<CheckCircle size={16} />} loading={busy === "approve"} disabled={busy !== null || !name} onClick={approve}>
+                <Button variant="primary" className="w-full" icon={<CheckCircle size={16} />} loading={busy === "approve"} disabled={busy !== null || !name || !session?.is_admin || accessRun.data?.permission === "view"} onClick={approve}>
                   Approve pairing
                 </Button>
               </div>
@@ -424,7 +423,7 @@ function SuggestionCard({ runId, s, onDone }: { runId: string; s: MiningSuggesti
                 <Field label="Reject note" hint="Why these two are not the same thing." htmlFor={`${uid}-reject`}>
                   <input id={`${uid}-reject`} className="input w-full" value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} />
                 </Field>
-                <Button variant="danger" className="w-full" icon={<Prohibit size={16} />} loading={busy === "reject"} disabled={busy !== null || !name} onClick={reject}>
+                <Button variant="danger" className="w-full" icon={<Prohibit size={16} />} loading={busy === "reject"} disabled={busy !== null || !name || !session?.is_admin || accessRun.data?.permission === "view"} onClick={reject}>
                   Reject pairing
                 </Button>
               </div>

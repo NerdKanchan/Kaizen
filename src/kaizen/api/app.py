@@ -1,17 +1,25 @@
-"""FastAPI application: the reviewer UI's backend. Local only; no external calls."""
+"""FastAPI backend for approved accounts and shared document reviews."""
 
+import json
 import os
 import re
+import shutil
+import tempfile
 import uuid
-from dataclasses import asdict
+import zipfile
+from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import pymupdf
-from fastapi import Body, Cookie, Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, Cookie, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi import Response as FastResponse
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from kaizen import __version__
 from kaizen.models import Classification, Run, Thresholds
@@ -20,39 +28,32 @@ from kaizen.reporting.annotated_bom import write_annotated_bom
 from kaizen.reporting.certificate import write_certificate, write_run_certificate
 from kaizen.reporting.excel import ReviewBundle, export_with_review
 from kaizen.reporting.excel_import import import_decisions
+from kaizen.review.access import AccessStore, bd_email
 from kaizen.review.action_items import ActionItemStore
 from kaizen.review.auth import AuthError, LocalAccounts, SupabaseAccounts, accounts_for
 from kaizen.review.business import BusinessAssumptions, business_case
+from kaizen.review.collaborative import CollaborativeReviewStore
+from kaizen.review.copies import copy_run, portable_payload, snapshot
 from kaizen.review.mining import approve_suggestion, mine_suggestions, reject_suggestion, terminology_worklist
 from kaizen.review.rundiff import diff_runs
-from kaizen.review.sessions import POLICY_REQUIRED, ReviewSession, SessionStore
+from kaizen.review.sessions import ReviewSession, SessionStore
 from kaizen.review.store import ReviewStore
 from kaizen.terminology.exchange import export_xlsx, import_csv, import_xlsx
 from kaizen.workspace import Workspace
 
 SESSION_COOKIE = "kaizen_session"
-SIGN_IN_HINT = "Sign in first: POST /api/auth/signin with your BD email, password and slot."
+SIGN_IN_HINT = "Sign in first: POST /api/auth/signin with your approved BD email and password."
 BLIND_REFUSAL = "Not available while you are reviewing blind: it would reveal reviewer 1's decisions. End your blind session or ask reviewer 1."
 
 # ---- sign-in -----------------------------------------------------------------------------------
-ALLOWED_EMAIL_DOMAINS = {"bd.com"}
-BAD_DOMAIN = "Only BD email addresses can sign in."
-
-
-def _allowed_domains() -> set[str]:
-    """Read at call time so a deployment can set KAIZEN_ALLOWED_DOMAINS without rebuilding the app."""
-    raw = os.environ.get("KAIZEN_ALLOWED_DOMAINS") or ",".join(sorted(ALLOWED_EMAIL_DOMAINS))
-    return {d.strip().lower() for d in raw.split(",") if d.strip()}
-
-
 def _bd_email(raw: str) -> str:
     """The address, normalised, or a 400. The domain must match a whole allowed domain: splitting on the
     last `@` and comparing for equality is what stops `someone@bd.com.evil.io` from passing as BD."""
-    email = (raw or "").strip().lower()
-    local, sep, domain = email.rpartition("@")
-    if not sep or not local or domain not in _allowed_domains():
-        raise HTTPException(400, BAD_DOMAIN)
-    return email
+    try:
+        return bd_email(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
 
 
 SEVERITY_RANK = {"BLOCKER": 0, "MAJOR": 1, "MINOR": 2, "INFO": 3, None: 4}
@@ -60,7 +61,6 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _demo_dataset_path() -> Path | None:
-    import os
 
     env = os.environ.get("KAIZEN_DEMO_DATA")
     candidates = [Path(env)] if env else []
@@ -132,12 +132,17 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     ws = workspace or Workspace.resolve(None)
     app = FastAPI(title="Kaizen Cross-Check", version=__version__)
     cache = RunCache(ws)
-    review = ReviewStore(ws.db)
+    review = CollaborativeReviewStore(ws.db)
+    access = AccessStore(ws.db)
     items = ActionItemStore(ws.db)
     sessions = SessionStore(ws.db)
     # Where email + password are checked: this workspace, or Supabase (see kaizen.review.auth). Only the
     # credentials move; sessions, slots, blind mode and decisions always stay in the workspace.
     accounts = accounts or accounts_for(ws.db)
+    if os.environ.get("KAIZEN_ADMIN_EMAIL"):
+        if accounts.name != 'local':
+            raise ValueError('Initial administrator bootstrap requires local accounts. Bootstrap before enabling Supabase.')
+        access.bootstrap(os.environ['KAIZEN_ADMIN_EMAIL'], os.environ.get('KAIZEN_ADMIN_PASSWORD'))
 
     # ---- reviewer sessions --------------------------------------------------------------------
     # Identity, slot and blind mode are server-side. The token lives in an HttpOnly cookie so page
@@ -145,10 +150,12 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     # session is present.
 
     def _open_session(kaizen_session: str | None = Cookie(default=None)) -> ReviewSession | None:
-        return sessions.resolve(kaizen_session)
+        session = sessions.resolve(kaizen_session)
+        profile = access.profile(session.reviewer) if session else None
+        return replace(session, slot=1, blind=False) if profile and profile['status'] == 'approved' else None
 
     def _identified(session: ReviewSession | None = Depends(_open_session)) -> ReviewSession | None:
-        if session is None and sessions.policy() == POLICY_REQUIRED:
+        if session is None:
             raise HTTPException(401, SIGN_IN_HINT)
         return session
 
@@ -165,12 +172,145 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         if session is not None and session.blind:
             raise HTTPException(403, BLIND_REFUSAL)
 
-    def run_path(path: Path) -> dict[str, Any]:
+    def run_path(path: Path, actor: str, name: str = "") -> dict[str, Any]:
         if not path.exists():
             raise HTTPException(400, f"folder not found: {path}")
         run = run_folder(path.resolve(), ws.repository.store(), Thresholds())
+        run.metadata.run_id = uuid.uuid4().hex
         cache.put(run)
-        return _summary(run, review)
+        label = name.strip()[:120] or f"{path.name.replace('_', ' ').replace('-', ' ').title()} · Review · {datetime.now(timezone.utc):%d %b %Y}"
+        with ws.db.lock:
+            ws.db.conn.execute('UPDATE runs SET owner=?, name=? WHERE run_id=?', (actor, label, run.metadata.run_id))
+            ws.db.conn.commit()
+        return _summary(run, review) | run_info(run.metadata.run_id, actor)
+
+    def require_run(run_id: str, actor: str, edit: bool = False, owner: bool = False):
+        permission = access.permission(run_id, actor)
+        if not permission:
+            raise HTTPException(404, 'Run not found or not shared with you.')
+        if owner and permission != 'owner':
+            raise HTTPException(403, 'Only the run owner can manage sharing or rename it.')
+        if edit and permission == 'view':
+            raise HTTPException(403, 'This run is shared with view-only access.')
+        return permission
+
+    def authorize(request: Request, session=Depends(_open_session)):
+        path = request.url.path
+        # Cookie authentication also requires same-origin mutations in the hosted app.
+        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            origin = request.headers.get('origin')
+            if origin and urlparse(origin).netloc != request.headers.get('host'):
+                raise HTTPException(403, 'Cross-origin changes are not allowed.')
+        if path in ('/api/auth/signin', '/api/auth/signup', '/api/sessions/current', '/api/health'):
+            return
+        if session is None:
+            raise HTTPException(401, 'Sign in with an approved BD account.')
+        actor = session.reviewer
+        admin = bool(access.profile(actor)['is_admin'])
+        if path.startswith('/api/admin') or path == '/api/audit' or path == '/api/runs/from-path':
+            if not admin:
+                raise HTTPException(403, 'Application administrator access required.')
+        if path == '/api/runs/from-path' and os.environ.get('KAIZEN_HOSTED') == '1':
+            raise HTTPException(403, 'Upload documents in the hosted app.')
+        if path.startswith('/api/terminology') and request.method not in ('GET', 'HEAD') and not admin:
+            raise HTTPException(403, 'Only application administrators can change shared terminology.')
+        rid = request.path_params.get('run_id')
+        if rid:
+            edit = request.method not in ('GET', 'HEAD') or any(x in path for x in ('export.xlsx', 'certificate.pdf', 'annotated-bom', 'download.zip'))
+            require_run(rid, actor, edit=edit, owner=path.endswith('/sharing') or (request.method == 'PATCH' and path == f'/api/runs/{rid}'))
+            if path.endswith('/diff') and request.query_params.get('against'):
+                require_run(request.query_params['against'], actor)
+            if any(x in path for x in ('/relationships/from-row', '/mining/approve', '/mining/reject')) and not admin:
+                raise HTTPException(403, 'Only application administrators can change shared terminology.')
+        ai_id = request.path_params.get('ai_id')
+        if ai_id:
+            ai = items.get(ai_id)
+            if ai is None:
+                raise HTTPException(404, 'Action item not found.')
+            require_run(ai.run_id, actor, edit=True)
+
+    app.router.dependencies.append(Depends(authorize))
+
+    def run_info(run_id, actor):
+        rec = ws.runs.get(run_id)
+        return {key: rec[key] for key in ('name', 'owner', 'copied_from')} | {'permission': access.permission(run_id, actor)}
+
+    @app.get('/api/profiles')
+    def profiles():
+        return [dict(r) for r in ws.db.conn.execute("SELECT email FROM profiles WHERE status='approved' ORDER BY email")]
+
+    @app.get('/api/admin/users')
+    def admin_users():
+        return [dict(r) for r in ws.db.conn.execute('SELECT * FROM profiles ORDER BY created_at DESC')]
+
+    @app.patch('/api/admin/users/{email}')
+    def update_user(email: str, payload: dict = Body(...), session=Depends(_identified)):
+        try:
+            current = access.profile(email)
+            if current is None:
+                raise KeyError(email)
+            if 'is_admin' in payload and type(payload['is_admin']) is not bool:
+                raise ValueError('is_admin must be a boolean.')
+            return access.update(email, session.reviewer, payload.get('status', current['status']), payload.get('is_admin', bool(current['is_admin'])))
+        except KeyError:
+            raise HTTPException(404, 'Account not found.')
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get('/api/runs/{run_id}/sharing')
+    def get_sharing(run_id: str):
+        return [dict(r) for r in ws.db.conn.execute('SELECT email,permission,shared_by,shared_at FROM run_shares WHERE run_id=? ORDER BY email', (run_id,))]
+
+    @app.put('/api/runs/{run_id}/sharing')
+    def share_run(run_id: str, payload: dict = Body(...), session=Depends(_identified)):
+        try:
+            access.share(run_id, payload.get('email', ''), payload.get('permission'), session.reviewer)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return get_sharing(run_id)
+
+    @app.patch('/api/runs/{run_id}')
+    def rename_run(run_id: str, payload: dict = Body(...), session=Depends(_identified)):
+        name = str(payload.get('name', '')).strip()
+        if not name or len(name) > 120:
+            raise HTTPException(400, 'Run name must contain 1–120 characters.')
+        with ws.db.lock:
+            ws.db.conn.execute('UPDATE runs SET name=? WHERE run_id=?', (name, run_id))
+            ws.db.audit(session.reviewer, 'run.renamed', f'{run_id}: {name}')
+            ws.db.conn.commit()
+        return run_info(run_id, session.reviewer)
+
+    @app.post('/api/runs/{run_id}/copy')
+    def make_copy(run_id: str, session=Depends(_identified)):
+        try:
+            run = copy_run(ws, cache.get(run_id), session.reviewer)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return _summary(run, review) | run_info(run.metadata.run_id, session.reviewer)
+
+    @app.get('/api/runs/{run_id}/download.zip')
+    def download_copy(run_id: str, session=Depends(_identified)):
+        temporary = tempfile.TemporaryDirectory()
+        root = Path(temporary.name)
+        try:
+            run = snapshot(cache.get(run_id), root / 'bundle', run_id)
+            bundle = root / 'bundle'
+            (bundle / 'run.json').write_text(json.dumps(portable_payload(run, bundle), indent=2))
+            export_with_review(ws, run, bundle / 'review.xlsx')
+            (bundle / 'history.json').write_text(json.dumps({r.row_id: review.history(run_id, r.row_id) for r in run.results}, indent=2))
+            (bundle / 'README.txt').write_text('Independent Kaizen snapshot. Edit review.xlsx offline. To continue in Kaizen, first use Make a copy, then import your workbook into that copy. Original approvals do not transfer to a new copy. Source files and portable run.json are included.\n')
+            archive = root / 'run.zip'
+            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
+                for file in bundle.rglob('*'):
+                    if file.is_file():
+                        z.write(file, file.relative_to(bundle))
+            return FileResponse(archive, filename=f'{run_id}-independent-copy.zip', background=BackgroundTask(temporary.cleanup))
+        except ValueError as e:
+            temporary.cleanup()
+            raise HTTPException(400, str(e))
+        except Exception:
+            temporary.cleanup()
+            raise
 
     # ---- sign-up and sign-in --------------------------------------------------------------------
     # A session can only be opened by someone holding an account on a BD address. Only /api/auth/signin
@@ -178,31 +318,34 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
 
     def _start_session(response: FastResponse, reviewer: str, payload: dict) -> dict:
         try:
-            s = sessions.open(reviewer, int(payload.get("slot", 1)), payload.get("blind"))
+            s = sessions.open(reviewer, 1, False)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e))
-        response.set_cookie(SESSION_COOKIE, s.token, httponly=True, samesite="lax", path="/")
-        return s.to_dict(sessions.policy())
+        response.set_cookie(SESSION_COOKIE, s.token, httponly=True, secure=os.environ.get("KAIZEN_SECURE_COOKIES") == "1", samesite="lax", path="/")
+        return s.to_dict("required") | {"is_admin": bool(access.profile(reviewer)["is_admin"])}
 
     @app.post("/api/auth/signup")
     def signup(payload: dict = Body(...)):
-        """Create an account for a BD address. Open registration: the domain is a format check, not proof
-        of employment — see docs/security-review.md."""
+        """Register a BD account; access remains pending until an administrator approves it."""
         email = _bd_email(payload.get("email", ""))
         try:
             accounts.sign_up(email, str(payload.get("password", "")))
         except AuthError as e:
             raise HTTPException(e.status, e.message)
-        return {"ok": True, "email": email}
+        access.register(email)
+        return {"ok": True, "email": email, "status": "pending"}
 
     @app.post("/api/auth/signin")
     def signin(response: FastResponse, payload: dict = Body(...)):
-        """Exchange an email and password for a review session, which carries the slot and blind flag."""
+        """Open a session only after password verification and application approval."""
         email = _bd_email(payload.get("email", ""))
         try:
             accounts.sign_in(email, str(payload.get("password", "")))
         except AuthError as e:
             raise HTTPException(e.status, e.message)
+        profile = access.register(email)
+        if profile['status'] != 'approved':
+            raise HTTPException(403, 'Your account is awaiting administrator approval.' if profile['status'] == 'pending' else 'Your account has not been approved. Contact an administrator.')
         return _start_session(response, email, payload)
 
     # ---- runs ---------------------------------------------------------------------------------
@@ -213,7 +356,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
 
     @app.get("/api/sessions/current")
     def current_session(session: ReviewSession | None = Depends(_open_session)):
-        return {"session": session.to_dict(sessions.policy()) if session else None, "blind_review_policy": sessions.policy(), "accounts": accounts.name}
+        return {"session": (session.to_dict("required") | {"is_admin": bool(access.profile(session.reviewer)["is_admin"])}) if session else None, "blind_review_policy": "required", "accounts": accounts.name}
 
     @app.delete("/api/sessions/current")
     def end_session(response: FastResponse, kaizen_session: str | None = Cookie(default=None)):
@@ -223,41 +366,54 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": __version__, "workspace": str(ws.path)}
+        return {"status": "ok", "version": __version__, "hosted": os.environ.get("KAIZEN_HOSTED") == "1"}
 
     @app.get("/api/runs")
-    def list_runs():
-        return ws.runs.list()
+    def list_runs(session=Depends(_identified)):
+        return [r | run_info(r['run_id'], session.reviewer) for r in ws.runs.list() if access.permission(r['run_id'], session.reviewer)]
 
     @app.post("/api/runs/from-path")
-    def run_from_path(payload: dict = Body(...)):
-        return run_path(Path(payload["path"]))
+    def run_from_path(payload: dict = Body(...), session=Depends(_identified)):
+        return run_path(Path(payload["path"]), session.reviewer, str(payload.get("name", "")))
 
     @app.post("/api/runs/upload")
-    async def run_upload(files: list[UploadFile] = File(...)):
-        target = ws.path / "uploads" / uuid.uuid4().hex[:12]
-        for f in files:
-            rel = Path(f.filename or "file")
-            if rel.is_absolute() or ".." in rel.parts:
-                raise HTTPException(400, f"invalid upload path {f.filename}")
-            dest = target / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(await f.read())
-        return run_path(target)
+    async def run_upload(files: list[UploadFile] = File(...), name: str = Form(""), session=Depends(_identified)):
+        target = ws.path / "uploads" / uuid.uuid4().hex
+        total = 0
+        seen = set()
+        try:
+            for f in files:
+                rel = Path(f.filename or "file")
+                if rel.is_absolute() or ".." in rel.parts or not rel.name or rel in seen:
+                    raise HTTPException(400, f"Invalid or duplicate upload path: {f.filename}")
+                seen.add(rel)
+                dest = target / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with dest.open('wb') as output:
+                    while chunk := await f.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > 250 * 1024 * 1024:
+                            raise HTTPException(413, 'Upload at most 250 MB per run.')
+                        output.write(chunk)
+            label = name or f"{Path(files[0].filename or 'Project').parts[0]} · Review · {datetime.now(timezone.utc):%d %b %Y}"
+            return await run_in_threadpool(run_path, target, session.reviewer, label)
+        except Exception:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
 
     @app.post("/api/demo/load")
-    def demo_load():
+    def demo_load(session=Depends(_identified)):
         src = _demo_dataset_path()
         if src is None:
             from kaizen.datasets.build import build_golden
 
             src = build_golden(ws.path / "demo-data")
-        return run_path(src)
+        return run_path(src, session.reviewer, "Demo · BOM cross-check")
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str, session: ReviewSession | None = Depends(_identified)):
         slot, blind = _view_of(session)
-        return _summary(cache.get(run_id), review)
+        return _summary(cache.get(run_id), review) | run_info(run_id, session.reviewer)
 
     @app.get("/api/runs/{run_id}/results")
     def get_results(run_id: str, check: str | None = None, sku: str | None = None, classification: str | None = None, severity: str | None = None, discrepancy: str | None = None, needs_validation: bool | None = None, state: str | None = None, role: str | None = None, viewer: int = 1, blind: bool = False, limit: int = 500, offset: int = 0, search: str | None = None, session: ReviewSession | None = Depends(_identified)):
@@ -304,14 +460,16 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
 
     @app.get("/api/runs/{run_id}/results/{row_id}")
     def get_row(run_id: str, row_id: str, viewer: int = 1, blind: bool = False, session: ReviewSession | None = Depends(_identified)):
-        slot, blind = _view_of(session, viewer, blind)
-        run = cache.get(run_id)
-        r = _find(run, row_id)
-        merged = review.rows_for_viewer(run_id, [r], viewer_slot=slot, blind=blind)[0]
-        hidden = ReviewStore.is_blind_hidden(review.decisions(run_id, row_id), slot, blind)
-        if session is not None:
-            review.mark_opened(run_id, row_id, session.slot)  # starts the effort clock for this reviewer
-        return {"result": r.model_dump(mode="json"), "evidence": {"a": _evidence(r.source_a), "b": _evidence(r.source_b)}, "decisions": {str(k): v for k, v in merged["decisions"].items()}, "state": merged["state"], "final": merged["final"], "effective_classification": merged["effective_classification"], "history": [{"event": "engine", "detail": "engine recommendation recorded with the run"}] if hidden else review.history(run_id, row_id), "viewer": {"slot": slot, "blind": blind, "reviewer": session.reviewer if session else None}, "action_items": [asdict(a) for a in items.for_row(run_id, row_id)]}
+        # A revision must describe exactly the decision snapshot shown to the user.
+        with ws.db.lock:
+            slot, blind = _view_of(session, viewer, blind)
+            run = cache.get(run_id)
+            r = _find(run, row_id)
+            merged = review.rows_for_viewer(run_id, [r], viewer_slot=slot, blind=blind)[0]
+            hidden = ReviewStore.is_blind_hidden(review.decisions(run_id, row_id), slot, blind)
+            if session is not None and access.permission(run_id, session.reviewer) != "view":
+                review.mark_opened(run_id, row_id, session.slot)  # starts the effort clock for this reviewer
+            return {"result": r.model_dump(mode="json"), "evidence": {"a": _evidence(r.source_a), "b": _evidence(r.source_b)}, "decisions": {str(k): v for k, v in merged["decisions"].items()}, "state": merged["state"], "final": merged["final"], "effective_classification": merged["effective_classification"], "permission": access.permission(run_id, session.reviewer), "revision": review.revision(run_id, row_id), "owner": ws.runs.get(run_id)["owner"], "history": [{"event": "engine", "detail": "engine recommendation recorded with the run"}] if hidden else review.history(run_id, row_id), "viewer": {"slot": slot, "blind": blind, "reviewer": session.reviewer if session else None}, "action_items": [asdict(a) for a in items.for_row(run_id, row_id)]}
 
     @app.get("/api/runs/{run_id}/documents")
     def get_documents(run_id: str):
@@ -357,11 +515,12 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     def post_decision(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
         run = cache.get(run_id)
         _find(run, payload["row_id"])
-        slot, blind = _view_of(session, int(payload.get("slot", 1)), bool(payload.get("blind", False)))
-        if session is not None and "slot" in payload and int(payload["slot"]) != session.slot:
-            raise HTTPException(400, f"this session reviews in slot {session.slot}; open a new session to review in slot {payload['slot']}")
+        slot, blind = _view_of(session)
         try:
-            review.decide(run_id, payload["row_id"], slot, _actor(session, payload.get("reviewer", "")), payload["decision"], payload.get("comment", ""), payload.get("override_classification"), blind)
+            with ws.db.lock:
+                if payload.get('expected_revision') != review.revision(run_id, payload['row_id']):
+                    raise HTTPException(409, 'This row changed. Refresh before saving your decision.')
+                review.decide(run_id, payload["row_id"], slot, _actor(session, payload.get("reviewer", "")), payload["decision"], payload.get("comment", ""), payload.get("override_classification"), blind)
         except ValueError as e:
             raise HTTPException(400, str(e))
         merged = review.rows_for_viewer(run_id, [_find(run, payload["row_id"])], viewer_slot=slot, blind=blind)[0]
@@ -369,12 +528,12 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
 
     @app.post("/api/runs/{run_id}/finalize")
     def post_final(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
-        cache.get(run_id)
+        _find(cache.get(run_id), payload["row_id"])
         slot, blind = _view_of(session)
         if ReviewStore.is_blind_hidden(review.decisions(run_id, payload["row_id"]), slot, blind):
             raise HTTPException(403, "Record your own decision on this row before closing it: you cannot see reviewer 1's yet.")
         try:
-            review.finalize(run_id, payload["row_id"], payload["final_decision"], _actor(session, payload.get("by", "")), payload.get("note", ""))
+            review.approve(run_id, payload["row_id"], payload["final_decision"], session.reviewer, payload.get("note", ""), payload.get("expected_revision"), payload.get("confirm_self_approval"))
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {"row_id": payload["row_id"], "state": review.row_state(run_id, payload["row_id"]).state}
@@ -382,7 +541,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     @app.post("/api/runs/{run_id}/bulk-accept")
     def post_bulk(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
         run = cache.get(run_id)
-        slot, _ = _view_of(session, int(payload.get("slot", 1)))
+        slot, _ = _view_of(session)
         return {"accepted": review.bulk_accept_clean(run_id, run.results, slot, _actor(session, payload.get("reviewer", "")))}
 
     @app.post("/api/runs/{run_id}/relationships/from-row")
@@ -439,9 +598,9 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
             raise HTTPException(400, str(e))
 
     @app.get("/api/action-items")
-    def list_action_items(status: str | None = None, run_id: str | None = None):
+    def list_action_items(status: str | None = None, run_id: str | None = None, session=Depends(_identified)):
         out = items.for_run(run_id) if run_id else items.list(status)
-        return [asdict(a) for a in out]
+        return [asdict(a) | {"permission": access.permission(a.run_id, session.reviewer)} for a in out if access.permission(a.run_id, session.reviewer)]
 
     @app.patch("/api/action-items/{ai_id}")
     def patch_action_item(ai_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
@@ -453,8 +612,8 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
             raise HTTPException(400, str(e))
 
     @app.post("/api/runs/{run_id}/verify-and-close")
-    def verify_and_close(run_id: str):
-        return asdict(items.verify_and_close(cache.get(run_id)))
+    def verify_and_close(run_id: str, session=Depends(_identified)):
+        return asdict(items.verify_and_close(cache.get(run_id), by=session.reviewer, allowed_run_ids={run_id}))
 
     @app.get("/api/runs/{run_id}/business-case")
     def get_business_case(run_id: str, baseline_minutes_per_sku: float = 60.0, hourly_rate: float = 37.5, skus_per_project: int = 100, projects_per_year: int = 20, reviewers: int = 2, minutes_per_validation_row: float = 1.5, minutes_per_cleared_row: float = 0.1, target_reduction_pct: float = 50.0):
@@ -521,7 +680,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         dest = folder / f"{uuid.uuid4().hex[:8]}-{re.sub(r'[^A-Za-z0-9._-]+', '_', Path(file.filename or 'decisions.xlsx').name)}"
         dest.write_bytes(file.file.read())
         try:
-            return import_decisions(ws, run, dest, session.slot, session.reviewer, dry_run=dry_run, force=force).to_dict()
+            return import_decisions(ws, run, dest, session.slot, session.reviewer, dry_run=dry_run, force=force, review_store=review).to_dict()
         except ValueError as e:
             raise HTTPException(400, str(e))
 

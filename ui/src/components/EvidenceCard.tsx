@@ -23,7 +23,7 @@ export function EvidenceCard({ side, runId, rowId, ev, itemId }: Props) {
     return (
       <Card>
         <CardHead title={`Source ${side}`} />
-        <div className="p-5 text-sm text-ink-3">No counterpart on this side: the engine found nothing to pair with.</div>
+        <div className="p-5 text-sm text-ink-3">No matching item in this document.</div>
       </Card>
     );
   }
@@ -33,7 +33,7 @@ export function EvidenceCard({ side, runId, rowId, ev, itemId }: Props) {
   const lowConf = ev.confidence < 0.7;
   const fallback = (
     <div className="space-y-2 text-sm">
-      <div className="text-ink-3">No page image for this source (spreadsheet). Locator and raw text:</div>
+      <div className="text-ink-3">Spreadsheet source. Cell location and text:</div>
       <div className="mono">{ev.locator ?? "—"}</div>
       <pre className="mono whitespace-pre-wrap bg-surface-2 rounded-md p-3">{ev.raw_text}</pre>
     </div>
@@ -66,14 +66,14 @@ export function EvidenceCard({ side, runId, rowId, ev, itemId }: Props) {
               </>
             )}
             <LinkButton size="sm" variant="ghost" to={docLink} icon={<ListMagnifyingGlass size={14} />}>
-              Extraction view
+              View document
             </LinkButton>
           </>
         }
       />
       <div className="p-3">
         <PageImage src={src} bbox={ev.bbox} fit={fit} alt={`${ev.file_name} page ${ev.page ?? ""}`} fallback={fallback} />
-        {src && ev.bbox === null && <div className="text-xs text-ink-3 mt-2">No bounding box for this value (for example a document header), so the page is shown without a highlight.</div>}
+        {src && ev.bbox === null && <div className="text-xs text-ink-3 mt-2">No page highlight is available for this value.</div>}
       </div>
       <dl className="kv px-5 pb-5 pt-1">
         <dt>Description</dt>

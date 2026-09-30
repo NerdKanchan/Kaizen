@@ -1,6 +1,8 @@
 // Thin typed client for the local Kaizen API (docs/api-contract.md). Relative URLs only, so the same bundle
 // works from the Vite dev server (proxy) and when served by the backend at "/".
 import type {
+  Profile,
+  RunShare,
   ActionItem,
   ActionStatus,
   BusinessCase,
@@ -78,12 +80,15 @@ function json(method: string, body: unknown): RequestInit {
 const enc = encodeURIComponent;
 
 export interface DecisionBody {
+  expected_revision?: number;
   row_id: string;
   decision: DecisionKind;
   comment?: string;
   override_classification?: Classification;
 }
 export interface FinalizeBody {
+  expected_revision: number;
+  confirm_self_approval: boolean;
   row_id: string;
   final_decision: DecisionKind;
   note?: string;
@@ -121,12 +126,21 @@ export interface RelationshipUpdateBody {
 export const api = {
   health: () => request<Health>("/api/health"),
 
+  profiles: () => request<{email: string}[]>("/api/profiles"),
+  users: () => request<Profile[]>("/api/admin/users"),
+  updateUser: (email: string, body: Partial<Profile>) => request<Profile>(`/api/admin/users/${enc(email)}`, json("PATCH", body)),
+  shares: (runId: string) => request<RunShare[]>(`/api/runs/${enc(runId)}/sharing`),
+  share: (runId: string, email: string, permission: "view" | "edit" | null) => request<RunShare[]>(`/api/runs/${enc(runId)}/sharing`, json("PUT", {email, permission})),
+  renameRun: (runId: string, name: string) => request<unknown>(`/api/runs/${enc(runId)}`, json("PATCH", {name})),
+  copyRun: (runId: string) => request<RunSummary>(`/api/runs/${enc(runId)}/copy`, {method: "POST"}),
+  downloadUrl: (runId: string) => `/api/runs/${enc(runId)}/download.zip`,
   // ---- runs
   listRuns: () => request<RunListItem[]>("/api/runs"),
   loadDemo: () => request<RunSummary>("/api/demo/load", { method: "POST" }),
   runFromPath: (path: string) => request<RunSummary>("/api/runs/from-path", json("POST", { path })),
-  uploadRun: (files: File[]) => {
+  uploadRun: (files: File[], name = "") => {
     const fd = new FormData();
+    fd.append("name", name);
     for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);
     return request<RunSummary>("/api/runs/upload", { method: "POST", body: fd });
   },

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -44,7 +44,7 @@ def _review_cells(review: ReviewBundle | None, r) -> list[Any]:
     return [
         _decision_cell(d1), d1.comment if d1 else None, d1.reviewer if d1 else None, d1.decided_at if d1 else None,
         _decision_cell(d2), d2.comment if d2 else None, d2.reviewer if d2 else None, d2.decided_at if d2 else None,
-        review.states.get(r.row_id, "ENGINE_RECOMMENDED"), items, f"FINALIZED: {final.final_decision}" if final else "OPEN",
+        review.states.get(r.row_id, "ENGINE_RECOMMENDED"), items, f"{'SELF-APPROVED' if final.note.startswith('Self-approved.') else 'FINALIZED'}: {final.final_decision}" if final else "OPEN",
     ]
 
 
@@ -54,8 +54,14 @@ def export_with_review(workspace, run: Run, path: Path | str, metrics: dict[str,
     from kaizen.review.business import business_case
     from kaizen.review.store import ReviewStore
 
-    review = ReviewStore(workspace.db)
     rid = run.metadata.run_id
+    record = workspace.runs.get(rid)
+    collaborative = bool(record and record.get('owner'))
+    if collaborative:
+        from kaizen.review.collaborative import CollaborativeReviewStore
+        review = CollaborativeReviewStore(workspace.db)
+    else:
+        review = ReviewStore(workspace.db)
     if metrics is None:
         sidecar = Path(path).parent / "accuracy.json"  # written by `kaizen demo` / `kaizen eval` beside the run
         if sidecar.exists():
@@ -64,11 +70,31 @@ def export_with_review(workspace, run: Run, path: Path | str, metrics: dict[str,
             metrics = json.loads(sidecar.read_text(encoding="utf-8"))
     decisions = review.all_decisions(rid)
     finals = review.finals(rid)
-    states = {r.row_id: ReviewStore.state_of(decisions.get(r.row_id, {}), finals.get(r.row_id)) for r in run.results}
+    states = {r.row_id: review.state_of(decisions.get(r.row_id, {}), finals.get(r.row_id)) for r in run.results}
     from kaizen.review.mining import terminology_worklist
 
     bundle = ReviewBundle(decisions=decisions, finals=finals, states=states, action_items=ActionItemStore(workspace.db).for_run(rid), business=business_case(run, timing=review.timing(rid)), worklist=terminology_worklist(run, review, workspace.repository).to_dict())
-    return write_report(run, path, metrics=metrics, review=bundle)
+    result = write_report(run, path, metrics=metrics, review=bundle)
+    if collaborative:
+        wb = load_workbook(result)
+        for sheet in wb:
+            # Preserve legacy data for old two-reviewer runs. New collaborative work has one decision.
+            if not any(2 in slots for slots in decisions.values()):
+                for col in range(sheet.max_column, 0, -1):
+                    header = str(sheet.cell(1, col).value or '')
+                    if header.startswith('Reviewer 2 '):
+                        sheet.column_dimensions[get_column_letter(col)].hidden = True
+        history = wb.create_sheet('Approval history')
+        history.append(['Row ID', 'Event', 'User', 'When', 'Decision', 'Classification', 'Comment', 'Self-approved'])
+        for row in run.results:
+            for event in review.history(rid, row.row_id)[1:]:
+                history.append([row.row_id, event['event'], event.get('reviewer') or event.get('finalized_by'), event.get('decided_at') or event.get('finalized_at'), event.get('decision') or event.get('final_decision'), event.get('override_classification'), event.get('comment') or event.get('note'), 'Yes' if event.get('self_approved') else ''])
+        history.freeze_panes = 'A2'
+        history.auto_filter.ref = history.dimensions
+        for col in history.columns:
+            history.column_dimensions[col[0].column_letter].width = 28
+        wb.save(result)
+    return result
 
 BOM_LABEL_COLUMNS = [
     "Row ID", "SKU", "Check",

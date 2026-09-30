@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 
 from kaizen.api.app import create_app
 from kaizen.cli.main import app as cli
+from kaizen.review.access import AccessStore
 from kaizen.review.auth import AuthError, LocalAccounts, SupabaseAccounts, accounts_for, is_secret_key, save_config, validate
 from kaizen.workspace import Workspace
 
@@ -74,7 +75,10 @@ def client(tmp_path, fake, monkeypatch):
 
 
 def signup(client, email=BD, password=PW):
-    return client.post("/api/auth/signup", json={"email": email, "password": password})
+    response = client.post("/api/auth/signup", json={"email": email, "password": password})
+    if response.status_code == 200 and hasattr(client, 'ws'):
+        AccessStore(client.ws.db).update(email, 'test administrator', 'approved', False)
+    return response
 
 
 def signin(client, email=BD, password=PW, slot=1):
@@ -86,7 +90,7 @@ def signin(client, email=BD, password=PW, slot=1):
 
 def test_sign_up_stores_the_account_in_supabase_not_the_workspace(client, fake):
     r = signup(client)
-    assert r.status_code == 200 and r.json() == {"ok": True, "email": BD}
+    assert r.status_code == 200 and r.json() == {"ok": True, "email": BD, "status": "pending"}
     assert BD in fake.users
     assert client.ws.db.conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"] == 0, "no password is kept locally"
 
@@ -118,25 +122,25 @@ def test_confirm_email_left_on_in_supabase_is_explained(tmp_path):
     s = signin(c)
     assert s.status_code == 403 and "Kaizen admin" in s.json()["detail"], "the stuck account is explained too"
     fake.confirm(BD)
-    assert signin(c).status_code == 200
+    assert signin(c).status_code == 403, "Provider confirmation does not grant Kaizen approval"
 
 
 # ---- signing in ---------------------------------------------------------------------------------
 
 
-def test_sign_in_opens_a_local_session_with_the_slot(client, fake):
+def test_sign_in_opens_a_user_session(client, fake):
     signup(client)
     s = signin(client, slot=2).json()
-    assert s["reviewer"] == BD and s["slot"] == 2 and s["blind"] is True
+    assert s["reviewer"] == BD and s["slot"] == 1 and s["blind"] is False
     assert client.ws.db.conn.execute("SELECT reviewer FROM sessions").fetchone()["reviewer"] == BD
 
 
-def test_the_same_account_works_from_a_second_workspace(tmp_path, fake):
+def test_provider_account_does_not_bypass_workspace_approval(tmp_path, fake):
     """Two laptops, one Supabase project: sign up on one, sign in on the other."""
     laptop_a = TestClient(create_app(Workspace(tmp_path / "a"), accounts=SupabaseAccounts(URL, KEY, http=fake)))
     laptop_b = TestClient(create_app(Workspace(tmp_path / "b"), accounts=SupabaseAccounts(URL, KEY, http=fake)))
     signup(laptop_a)
-    assert signin(laptop_b).status_code == 200
+    assert signin(laptop_b).status_code == 403
 
 
 def test_wrong_password_and_unknown_account_look_the_same(client, fake):
@@ -154,7 +158,7 @@ def test_the_ui_is_told_where_accounts_live(client, tmp_path):
 
 def test_no_password_reset_routes_exist(client):
     """Nothing in Kaizen sends email: a forgotten password is set by an administrator in Supabase."""
-    assert client.post("/api/auth/forgot", json={"email": BD}).status_code in (404, 405)
+    assert client.post("/api/auth/forgot", json={"email": BD, "status": "pending"}).status_code in (404, 405)
     assert client.post("/api/auth/reset", json={"access_token": "x", "password": PW}).status_code in (404, 405)
 
 

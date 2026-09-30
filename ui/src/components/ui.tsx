@@ -1,7 +1,7 @@
 // Primitives shared by every page. Visual rules: docs/design/DESIGN.md. Keep the vocabulary small and
 // consistent: a page should never invent its own button or card.
 import { CircleNotch, X } from "@phosphor-icons/react";
-import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, type LinkProps } from "react-router-dom";
 
@@ -82,7 +82,7 @@ export function CardHead({ title, description, actions, icon, count, className =
 
 export function PageHeader({ title, description, actions, meta, back }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; meta?: ReactNode; back?: { to: string; label: string } }) {
   return (
-    <div className="flex flex-wrap items-start gap-x-6 gap-y-3 mb-5">
+    <div className="page-heading flex flex-wrap items-start gap-x-6 gap-y-3 mb-5">
       <div className="head-title">
         {back && (
           <Link to={back.to} className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-brand-600 no-underline mb-1">
@@ -111,13 +111,20 @@ export function SectionTitle({ children, count, actions, className = "" }: { chi
 // ---- fields ----------------------------------------------------------------------------------
 
 export function Field({ label, hint, error, htmlFor, children, className = "" }: { label: ReactNode; hint?: ReactNode; error?: ReactNode; htmlFor?: string; children: ReactNode; className?: string }) {
+  const generatedId = useId();
+  const control = isValidElement(children) && typeof children.type === "string" && ["input", "select", "textarea"].includes(children.type)
+    ? children as ReactElement<{ id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean }>
+    : null;
+  const id = htmlFor ?? control?.props.id ?? generatedId;
+  const noteId = `${id}-note`;
+  const describedBy = [control?.props["aria-describedby"], (error || hint) && noteId].filter(Boolean).join(" ");
   return (
     <div className={className}>
-      <label className="label" htmlFor={htmlFor}>
+      <label className="label" htmlFor={control || htmlFor ? id : undefined}>
         {label}
       </label>
-      {children}
-      {error ? <div className="text-xs text-bad mt-1">{error}</div> : hint ? <div className="hint mt-1">{hint}</div> : null}
+      {control ? cloneElement(control, { id, "aria-describedby": describedBy || undefined, "aria-invalid": error ? true : undefined }) : children}
+      {error ? <div id={noteId} className="text-xs text-bad mt-1">{error}</div> : hint ? <div id={noteId} className="hint mt-1">{hint}</div> : null}
     </div>
   );
 }
@@ -166,27 +173,40 @@ export function EmptyState({ icon, title, description, action, className = "" }:
 
 export function Dialog({ open, onClose, title, description, children, footer, width = "md", closeLabel = "Close" }: { open: boolean; onClose: () => void; title: ReactNode; description?: ReactNode; children?: ReactNode; footer?: ReactNode; width?: "sm" | "md" | "lg"; closeLabel?: string }) {
   const panel = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Tab") {
+        const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]') ?? []).filter(el => el.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (!first) { e.preventDefault(); panel.current?.focus(); }
+        else if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
       }
     };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKey, true);
     panel.current?.querySelector<HTMLElement>("button, [href], input, select, textarea")?.focus();
     return () => {
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKey, true);
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   const w = width === "sm" ? "max-w-md" : width === "lg" ? "max-w-3xl" : "max-w-xl";
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 scrim enter-fade" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={panel} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} className={`w-full ${w} max-h-[calc(100vh-2rem)] overflow-y-auto card shadow-pop enter-pop`}>
+      <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} className={`w-full ${w} max-h-[calc(100vh-2rem)] overflow-y-auto card shadow-pop enter-pop`}>
         <div className="flex items-start gap-3 px-5 pt-4 pb-3">
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold">{title}</h2>

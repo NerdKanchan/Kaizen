@@ -1,5 +1,27 @@
 export const enc = encodeURIComponent;
 
+const ISSUE_LABELS: Record<string, string> = {
+  QTY_MISMATCH: "Quantity mismatch",
+  DESC_MISMATCH: "Description mismatch",
+  MISSING_IN_LABEL: "Missing from label",
+  MISSING_IN_BOM: "Missing from BOM",
+  REF_PARENT_MISMATCH: "Label reference mismatch",
+  AMBIGUOUS_MATCH: "Ambiguous match",
+  LOW_EXTRACTION_CONFIDENCE: "Low extraction confidence",
+  MISSING_IN_DRAWING: "Missing from drawing",
+  EXTRA_ON_DRAWING: "Extra item on drawing",
+  PCO_CHANGE_NOT_APPLIED: "PCO change not applied",
+  PCO_QTY_SEQ_MISMATCH: "PCO quantity or sequence mismatch",
+  BOM_MISSING_FOR_AFFECTED_CODE: "BOM missing for affected code",
+  UNEXPECTED_LABEL_CHANGE: "Unexpected label change",
+  EXPECTED_CHANGE_ABSENT: "Expected change missing",
+  DRAWING_REV_MISMATCH: "Drawing revision mismatch",
+};
+
+export function issueLabel(code: string): string {
+  return ISSUE_LABELS[code] ?? code.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+}
+
 export function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);

@@ -29,6 +29,7 @@ interface Group {
 
 export default function DocumentsPage() {
   const { runId = "" } = useParams();
+  const access = useAsync(() => api.getRun(runId), [runId]);
   const nav = useNavigate();
   const docs = useAsync(() => api.getDocuments(runId), [runId]);
   const [filter, setFilter] = useState("");
@@ -61,9 +62,9 @@ export default function DocumentsPage() {
   return (
     <div>
       <PageHeader
-        back={{ to: `/runs/${enc(runId)}`, label: "Dashboard" }}
+        back={{ to: `/runs/${enc(runId)}`, label: "Overview" }}
         title="Documents"
-        description="Every file this run parsed, grouped by the SKU set it belongs to. Open a document to check the extraction line by line against the page it came from."
+        description="Source documents grouped by SKU. Open a file to check the extracted text."
         meta={
           docs.data && (
             <>
@@ -84,8 +85,8 @@ export default function DocumentsPage() {
       <div className="space-y-5 stagger">
         <Card>
           <CardHead
-            title="Parsed documents"
-            description="Parser and version are recorded with every file, so an extraction can be explained months later."
+            title="Source documents"
+            description=""
             count={docs.data ? (filtering ? `${shown} of ${all.length}` : all.length) : undefined}
             icon={<Files size={18} />}
             actions={
@@ -107,11 +108,11 @@ export default function DocumentsPage() {
             (all.length === 0 ? (
               <EmptyState
                 icon={<Files size={36} />}
-                title="This run parsed no documents"
-                description="Nothing in the input folder was recognised as a BOM, label, drawing or PCO. Start a new run from a folder that holds the SKU sub-folders."
+                title="No documents found"
+                description="Start a new cross-check with BOM, label, drawing or PCO files."
                 action={
                   <LinkButton to="/" variant="primary">
-                    Go to runs
+                    All runs
                   </LinkButton>
                 }
               />
@@ -195,7 +196,7 @@ export default function DocumentsPage() {
                                 <LinkButton size="sm" to={to} icon={<Eye size={16} />}>
                                   Document
                                 </LinkButton>
-                                {d.doc_type === "BOM" && (
+                                {d.doc_type === "BOM" && access.data?.permission !== "view" && (
                                   <AnchorButton size="sm" href={api.annotatedBomUrl(runId, d.id)} download icon={<FileArrowDown size={16} />} title="BOM PDF with check marks from the reviewer decisions">
                                     Annotated BOM
                                   </AnchorButton>

@@ -1,7 +1,8 @@
-import { HashRouter, Link, Route, Routes } from "react-router-dom";
+import { HashRouter, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { ReviewerProvider } from "./lib/reviewer";
 import { ToastProvider } from "./lib/toast";
+import { LinkButton, PageHeader } from "./components/ui";
 import ActionItemsPage from "./pages/ActionItemsPage";
 import BusinessCasePage from "./pages/BusinessCasePage";
 import DashboardPage from "./pages/DashboardPage";
@@ -11,6 +12,7 @@ import DocumentsPage from "./pages/DocumentsPage";
 import EvidencePage from "./pages/EvidencePage";
 import MiningPage from "./pages/MiningPage";
 import ReviewQueuePage from "./pages/ReviewQueuePage";
+import AdminPage from "./pages/AdminPage";
 import RunsPage from "./pages/RunsPage";
 import TerminologyPage from "./pages/TerminologyPage";
 
@@ -23,6 +25,7 @@ export default function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<RunsPage />} />
+            <Route path="/admin" element={<AdminPage />} />
             <Route path="/runs/:runId" element={<DashboardPage />} />
             <Route path="/runs/:runId/review" element={<ReviewQueuePage />} />
             <Route path="/runs/:runId/rows/:rowId" element={<EvidencePage />} />
@@ -36,11 +39,9 @@ export default function App() {
             <Route
               path="*"
               element={
-                <div className="text-xs">
-                  Page not found.{" "}
-                  <Link className="underline" to="/">
-                    Back to runs
-                  </Link>
+                <div>
+                  <PageHeader title="Page not found" description="The address doesn’t match a page in Kaizen." />
+                  <LinkButton to="/" variant="primary">Back to runs</LinkButton>
                 </div>
               }
             />

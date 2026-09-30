@@ -55,10 +55,10 @@ export function ClassificationBadge({ value, title, size = "sm" }: { value: stri
 }
 
 const SEV: Record<Severity, string> = {
-  BLOCKER: "bg-sev-blocker text-white",
-  MAJOR: "bg-sev-major text-white",
+  BLOCKER: "bg-bad-soft text-bad-strong",
+  MAJOR: "bg-warn-soft text-warn-strong",
   MINOR: "bg-warn-soft text-warn-strong",
-  INFO: "bg-sev-info text-white",
+  INFO: "bg-surface-2 text-ink-2",
 };
 const SEV_LABEL: Record<Severity, string> = { BLOCKER: "Blocker", MAJOR: "Major", MINOR: "Minor", INFO: "Info" };
 
@@ -66,10 +66,11 @@ export function SeverityBadge({ value, size = "sm" }: { value: string | null | u
   if (!value) return <span className="text-ink-4">—</span>;
   const cls = SEV[value as Severity] ?? "bg-surface-3 text-ink";
   const sz = size === "md" ? "h-7 px-2.5 text-sm" : "h-[22px] px-2 text-xs";
-  return <span className={`inline-flex items-center rounded-full font-semibold tracking-wide whitespace-nowrap ${sz} ${cls}`}>{SEV_LABEL[value as Severity] ?? value}</span>;
+  return <span className={`inline-flex items-center rounded-md font-medium whitespace-nowrap ${sz} ${cls}`}>{SEV_LABEL[value as Severity] ?? value}</span>;
 }
 
 const STATE_TONE: Record<ReviewState, Tone> = {
+  REVIEWED: "info",
   ENGINE_RECOMMENDED: "neutral",
   REVIEWER_1_COMPLETE: "info",
   REVIEWER_2_COMPLETE: "info",
@@ -78,12 +79,13 @@ const STATE_TONE: Record<ReviewState, Tone> = {
   FINALIZED: "ink",
 };
 const STATE_LABEL: Record<ReviewState, string> = {
-  ENGINE_RECOMMENDED: "Engine recommended",
+  REVIEWED: "Reviewed",
+  ENGINE_RECOMMENDED: "Not reviewed",
   REVIEWER_1_COMPLETE: "Reviewer 1 done",
   REVIEWER_2_COMPLETE: "Reviewer 2 done",
   AGREED: "Agreed",
   DISAGREEMENT: "Disagreement",
-  FINALIZED: "Finalized",
+  FINALIZED: "Approved",
 };
 
 export function StateBadge({ value }: { value: string | null | undefined }) {

@@ -235,6 +235,8 @@ class UserStore:
             return False
         with self.db.lock:
             self.conn.execute("DELETE FROM users WHERE email = ?", (email,))
+            self.conn.execute("UPDATE sessions SET ended_at = ? WHERE reviewer = ? AND ended_at = ''", (_now(), email))
+            self.conn.execute("UPDATE profiles SET status = 'pending', is_admin = 0 WHERE email = ?", (email,))
             self.db.audit(by, "auth.reset", f"account cleared for {email}; they can sign up again")
             self.conn.commit()
         return True
