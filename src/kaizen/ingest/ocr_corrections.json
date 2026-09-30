@@ -1,0 +1,23 @@
+{
+  "_comment": "Product-name OCR corrections. Each entry: [pattern, replacement]. All patterns match case-insensitively. Add new entries here as new OCR glitches are found in the field.",
+  "corrections": [
+    ["\\bstatlockr['\u2019\u00b7\\s]*",          "StatLock "],
+    ["\\bchloraprepm\\b",                 "ChloraPrep"],
+    ["\\bchlorapreptl\\.i\\b",            "ChloraPrepTM"],
+    ["\\b3CGTl\\.I\\b",                   "3CGTM"],
+    ["\\bflexuram\\b",                    "FlexuraTM"],
+    ["\\blsopropyl\\b",                   "Isopropyl"],
+    ["\\bv1ith\\b",                       "with"],
+    ["\\bstyle[!]l?(?=\\s|$)",            "Stylet"],
+    ["\\bStylet[!]T\\b",                  "Stylet/T"],
+    ["\\bSherlockTM(?=[A-Z])",            "Sherlock TM "],
+    ["(?<=Sensor)(?=Holder)",             " "],
+    ["\\bBlueElastic(?=\\s|[A-Z])",       "Blue Elastic"],
+    ["\\bECGLeads(?=\\s|[A-Z])",          "ECG Leads"],
+    ["(?<=Leads)(?=Assembly)",            " "],
+    ["\\bWipe(?=\\d)",                    "Wipe "],
+    ["\\bAspirationDevice\\b",            "Aspiration Device"],
+    ["\\bMicroEZTMMicrointroducer\\b",    "MicroEZTM Microintroducer"],
+    ["3CGTM(?=[A-Z])",                    "3CGTM "]
+  ]
+}
