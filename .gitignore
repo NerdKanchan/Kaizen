@@ -13,6 +13,14 @@ kaizen-workspace/
 # The hackathon brief is BD-internal material; keep it local, never in the public repo.
 docs/reference/*.pdf
 
+# Customer-provided BD source data stays local. Public tests use extraction fixtures.
+trainingdataset/
+tmp/real-data/
+# Anything derived from it that names BD documents or transcribes their content stays local too:
+# the private regression suite and the detailed findings (the public summary is docs/real-data-validation.md).
+tests/real/
+docs/private/
+
 # Third-party agent skills installed with `npx skills add` (not part of the product)
 .claude/skills/
 .claude/launch.json

@@ -1,21 +1,19 @@
 """One shared review per row, with append-only changes and explicit approvals."""
 import json
-from contextlib import contextmanager
 from dataclasses import asdict
 
 from kaizen.review.store import ReviewStore
 
 
 class CollaborativeReviewStore(ReviewStore):
-    @contextmanager
     def _atomic(self):
-        with self.db.lock:
-            try:
-                yield
-                self.conn.commit()
-            except Exception:
-                self.conn.rollback()
-                raise
+        return self.db.transaction()
+
+    def bulk_accept_clean(self, run_id, results, slot, reviewer):
+        # Keep the initial "not reviewed" snapshot and every write together. Another editor must
+        # not have their decision overwritten between the snapshot and the bulk operation.
+        with self._atomic():
+            return super().bulk_accept_clean(run_id, results, slot, reviewer)
 
     @staticmethod
     def state_of(decisions, final):

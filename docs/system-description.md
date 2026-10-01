@@ -25,7 +25,7 @@ the Excel tracker and a marked-up BOM.
 | Approve or finalise anything by itself | The reviewer is the decision-maker; the engine only recommends. |
 | Depend on a language model | The engine is deterministic and offline. AI is an opt-in annotator that can never change a classification. |
 | Claim regulatory compliance | The system is built for traceability and reproducibility. Formal validation is a separate exercise. |
-| Read scanned BOMs or drawings, or hand-drawn redlines | Not implemented. See [`known-limitations.md`](known-limitations.md). |
+| Interpret pictured parts, leader endpoints, placement or hand-drawn redlines | Diagram text OCR is implemented; these visual checks are not. See [`known-limitations.md`](known-limitations.md). |
 
 ---
 
@@ -123,11 +123,12 @@ legacy reviewer fields. `severity` is a property returning the highest severity 
 carries either a `Document` or a reason the file was not recognised. Nothing is guessed silently: an
 unreadable file produces a warning and, where it matters, a blocking result row.
 
-### BOM, JDE print PDF (`ingest/bom_pdf.py`, parser version `1+cat2`)
+### BOM, JDE print PDF (`ingest/bom_pdf.py`, parser version `2+cat3`)
 
 Reads a JDE R30460 "Multi-Level Bill of Material" print. `ingest/pdf_words.py` extracts positioned words,
 groups them into lines, splits lines on wide gaps and assigns words to columns using bands derived from
-the header labels, so column drift between pages does not shift the data. The parser reads the header
+the header labels and explicit body-row starts, so indented headings do not drop short component IDs.
+Scanned pages fall back to offline OCR; unreadable pages block component comparisons. The parser reads the header
 (parent item, description, branch, batch quantity, bill revision), then each component row: level, item,
 description, quantity per, UOM, effective from and thru, operation sequence. Rows whose effectivity has
 expired become `is_active = False`. FreeText annotations are captured into `attributes.redlines` and
@@ -137,23 +138,31 @@ recorded with reduced confidence rather than defaulted to 1.
 ### BOM, spreadsheet export (`ingest/bom_table.py`)
 
 XLSX and CSV with alias-tolerant header matching (for example "Component Item", "Item Number", "Item").
-Evidence records the sheet and cell.
+Evidence records the sheet and row. JDE's `Oper Seq#`, drawing-number and stocking-type columns are retained.
+A missing parent can be inferred from a BD-shaped export filename, with a review-required warning; an explicit
+parent in the source wins. Encrypted workbooks are skipped with an actionable explanation.
 
-### Label PDF (`ingest/label_pdf.py`, parser version `1`)
+### Label PDF (`ingest/label_pdf.py`, parser version `2`)
 
 Finds the REF by frequency across the page (labels repeat it on peel-off sub-labels), locates the "Full Kit
 Contents" region, and reads the contents in columns anchored on the "N Each" line starters, so a
 two-column kit list is not interleaved. Wrapped continuation lines are joined. `ingest/quantity.py` parses
 each line into quantity, unit and description, and understands sub-quantity idioms such as "(3 per)" and
-"(1 pair)". If a page has no text layer, `ingest/ocr.py` is used when `rapidocr-onnxruntime` is installed;
-otherwise the page is reported as unreadable and the affected rows become blockers.
+"(1 pair)". Scanned pages and labels with unreadable native REF layers use offline Tesseract or RapidOCR.
+Joined quantity/unit/description tokens are split for parsing while original OCR text remains evidence.
+Page-aware entry IDs avoid collisions, and each entry retains confidence and displayed-page geometry.
+A page from which nothing could be read blocks comparisons; an unparsed line is reported without discarding the rest. Good native text is not rewritten with OCR corrections.
 
-### Packaging drawing PDF (`ingest/drawing_pdf.py`, parser version `1`)
+### Packaging drawing PDF (`ingest/drawing_pdf.py`, parser version `2`)
 
 Reads the title block (drawing number, revision, title, plant), then clusters callout text into
 English/Spanish pairs, keeping the English text as the item. Conditional callouts ("IF APPLICABLE PER BOM")
 and placement-only notes are marked so they are not treated as required items. Cavity labels and drawing
-furniture are filtered by pattern.
+furniture are filtered by pattern. Scanned, rotated sheets use offline OCR. Centred and right-aligned bilingual
+callouts are clustered, repeated component identities are compared once with all occurrence evidence, and
+assembly instructions remain visible without becoming component rows. Reference-only notes trigger
+applicability review for unmatched illustrated components. Small revision cells can be re-read separately;
+low-confidence revisions remain review-required. This does not interpret the photographs or leader lines.
 
 ### PCO form (`ingest/pco.py`, parser version `1`)
 
@@ -162,7 +171,7 @@ item number, description, quantity and operation sequence. Each row is classifie
 ADD, DELETE, SUBSTITUTE or MODIFY with a `change_key` used later to match the change against the BOM and
 against label revisions.
 
-### Categorisation (`ingest/bom_categorize.py`, version `2`)
+### Categorisation (`ingest/bom_categorize.py`, version `3`)
 
 Phrase-level rules in `bom_category_rules.json` assign an `ItemCategory` and a human-readable reason to
 every BOM line. This is what stops "EN LOD, CASE LABEL" or "PACKAGING QUALITY" from being reported as
@@ -295,10 +304,13 @@ created, updated, skipped and rejected rows with reasons.
 sets, and `run_checks` runs the six checks, assembles coverage, records relationship usage and builds the
 `Run`.
 
-The **run id** is a SHA-256 over: every input file hash, the terminology snapshot hash, the thresholds, the
-tool version and every parser and checker version. Identical inputs and identical code therefore produce an
+The **run id** is a SHA-256 over: every input path and file hash, the extracted content/evidence signature,
+the terminology snapshot hash, the thresholds, the tool version and every parser and checker version.
+Identical inputs, extraction output and versions therefore produce an
 identical run id and identical row ids, which is what lets reviewer decisions re-attach across a rerun; a
-code change produces a new id, so stale decisions are never silently reused.
+version or extraction change produces a new id, so stale decisions are not silently reused after an OCR change.
+Mirrored source copies and matching JDE export references remain in the run, but are compared once. One
+shared batch drawing can be attached to missing-drawing sets with an explicit applicability warning.
 
 `CAPABILITIES` is a dictionary of feature name to implementation status, recorded in run metadata and shown
 in the workbook and the UI, so the tool states plainly what it does and does not do.
@@ -691,11 +703,11 @@ under a lock, verified by a 25-thread test. Full review, including the accepted 
 
 ## 19. Known limitations
 
-The honest list lives in [`known-limitations.md`](known-limitations.md). The headline items: no OCR for
-scanned BOMs or drawings and no hand-drawn redlines; truncated JDE descriptions are matched by similarity
-rather than a prefix rule; thresholds were tuned on synthetic data; sign-in identifies rather than
-does not prove ownership of the email address; review data is per workspace, not shared between
-laptops; case labels are not parsed.
+The honest list lives in [`known-limitations.md`](known-limitations.md). OCR now reads scanned BOMs, labels
+and drawings; visual part identity, leader endpoints, placement and hand-drawn redlines remain unsupported.
+Thresholds and accuracy figures above are synthetic. Case labels and compound assembly mappings need further work.
 
-The single largest risk is that every accuracy figure in this document was measured on synthetic documents.
-The parsers have never seen a real JDE print or MasterControl label.
+The supplied BD delivery now has independent extraction validation: 373 BOM rows agree with the JDE exports,
+140 label quantities agree with page-image transcription, and named drawing probes cover all ten sheets.
+Real pairing/discrepancy accuracy remains unmeasured because independently reviewed ground truth and an
+unlocked relationship workbook are missing. See [`real-data-validation.md`](real-data-validation.md).

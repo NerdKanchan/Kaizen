@@ -41,5 +41,13 @@ class Relationship(BaseModel):
             raise ValueError("scope must be 'global', 'family:<prefix>' or 'sku:<code>'")
         return v
 
+    @field_validator("canonical")
+    @classmethod
+    def nonempty_canonical(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("canonical wording must not be empty")
+        return value
+
     def terms(self) -> list[str]:
         return [self.canonical, *self.aliases]

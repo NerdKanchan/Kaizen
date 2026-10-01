@@ -15,17 +15,19 @@ import ReviewQueuePage from "./pages/ReviewQueuePage";
 import AdminPage from "./pages/AdminPage";
 import RunsPage from "./pages/RunsPage";
 import TerminologyPage from "./pages/TerminologyPage";
+import ProfilePage from "./pages/ProfilePage";
 
 // HashRouter: the bundle is served as static files by the backend, so deep links must not need server routing.
 export default function App() {
   return (
     <ReviewerProvider>
       <ToastProvider>
-      <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HashRouter>
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<RunsPage />} />
             <Route path="/admin" element={<AdminPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
             <Route path="/runs/:runId" element={<DashboardPage />} />
             <Route path="/runs/:runId/review" element={<ReviewQueuePage />} />
             <Route path="/runs/:runId/rows/:rowId" element={<EvidencePage />} />

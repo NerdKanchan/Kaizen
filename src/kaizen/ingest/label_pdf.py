@@ -18,13 +18,14 @@ from kaizen.ingest.quantity import parse_label_line
 from kaizen.models import BBox, DocType, Document, DocumentItem, Evidence, ItemCategory
 
 PARSER_NAME = "label_pdf"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"
 
 _REF_CODE_RE = re.compile(r"^[A-Z0-9]{5,12}$")
 _NUMBER_RE = re.compile(r"^\d+(?:\.\d+)?$")
 _UOM_WORDS = {"EACH", "EA", "PAIR", "PAIRS", "PACK", "PACKS", "PKG", "PCS", "PC", "ROLL", "ROLLS", "SET", "SETS"}
 _FUSED_STARTER_RE = re.compile(r"^\d+(?:\.\d+)?(?:EACH|EA|PAIRS?|PACKS?|PKG|PCS|PC|ROLLS?|SETS?)$", re.IGNORECASE)
-_FUSED_STARTER_PREFIX_RE = re.compile(r"^(?P<head>\d+(?:\.\d+)?(?:EACH|EA|PAIRS?|PACKS?|PKG|PCS|PC|ROLLS?|SETS?))(?P<rest>[-\u2013\u2014:].+)$", re.IGNORECASE)
+_FUSED_STARTER_PREFIX_RE = re.compile(r"^(?P<head>\d+(?:\.\d+)?(?:EACH|EA|PAIRS?|PACKS?|PKG|PCS|PC|ROLLS?|SETS?))(?P<rest>.+)$", re.IGNORECASE)
+_FUSED_UNIT_RE = re.compile(r"^(?P<head>EACH|EA|PAIRS?|PACKS?|PKG|PCS|PC|ROLLS?|SETS?)(?P<rest>[-\u2013\u2014:.,].*)$", re.IGNORECASE)
 _TERMINATOR_PREFIXES = ("store between", "lot ", "assembled", "(01)", "ref ")
 _TERMINATOR_CONTAINS = ("are trademarks", "registered trademark")
 _COLUMN_GAP = 40.0
@@ -47,13 +48,17 @@ def _expand_fused_tokens(words: list[Word]) -> list[Word]:
     separator is kept on the description word since parse_label_line() requires one between qty/uom and desc."""
     out: list[Word] = []
     for w in words:
-        m = _FUSED_STARTER_PREFIX_RE.match(w.text)
-        if not m or not m.group("rest").strip("-\u2013\u2014: "):
+        if _FUSED_STARTER_RE.fullmatch(w.text) or w.text.upper() in _UOM_WORDS:
+            out.append(w)
+            continue
+        m = _FUSED_STARTER_PREFIX_RE.match(w.text) or _FUSED_UNIT_RE.match(w.text)
+        if not m:
             out.append(w)
             continue
         split_x = w.x0 + (w.x1 - w.x0) * len(m.group("head")) / len(w.text)
-        out.append(Word(text=m.group("head"), x0=w.x0, y0=w.y0, x1=split_x, y1=w.y1, block=w.block, line=w.line, word_no=w.word_no, confidence=w.confidence))
-        out.append(Word(text=m.group("rest"), x0=split_x, y0=w.y0, x1=w.x1, y1=w.y1, block=w.block, line=w.line, word_no=w.word_no, confidence=w.confidence))
+        out.append(Word(text=m.group("head"), x0=w.x0, y0=w.y0, x1=split_x, y1=w.y1, block=w.block, line=w.line, word_no=w.word_no, confidence=w.confidence, source_text=w.source_text if w.source_text is not None else w.text))
+        rest = m.group("rest").lstrip("-\u2013\u2014:., ")
+        out.append(Word(text="-" + rest, x0=split_x, y0=w.y0, x1=w.x1, y1=w.y1, block=w.block, line=w.line, word_no=w.word_no, confidence=w.confidence, source_text=""))
     return out
 
 
@@ -61,8 +66,13 @@ def _find_ref(lines: list[list[Word]]) -> tuple[str | None, int, int | None]:
     counts: Counter[str] = Counter()
     first_line: dict[str, int] = {}
     for idx, line in enumerate(lines):
+        for w in line:
+            if m := re.fullmatch(r"REF[:.]?(?=[A-Z]*\d)([A-Z0-9]{5,12})", w.text.upper()):
+                code = m.group(1)
+                counts[code] += 1
+                first_line.setdefault(code, idx)
         for i, w in enumerate(line[:-1]):
-            if w.text.upper().rstrip(":") == "REF" and _REF_CODE_RE.match(line[i + 1].text):
+            if w.text.upper().rstrip(":") == "REF" and _REF_CODE_RE.match(line[i + 1].text) and any(c.isdigit() for c in line[i + 1].text):
                 code = line[i + 1].text
                 counts[code] += 1
                 first_line.setdefault(code, idx)
@@ -102,30 +112,56 @@ def parse_label_pdf(path: Path | str) -> Document:
     items: list[DocumentItem] = []
     warnings: list[str] = []
     method = "none"
+    unreadable: set[int] = set()
     for page in pdf:
         page_no = page.number + 1
-        words = extract_words(page)
+        native = extract_words(page)
+        words = native
         page_method = "pdf_text"
-        if not words:
-            if page.get_images(full=True) and ocr_available():
-                result = ocr_page(page)
-                words = ocr_words(result)
-                page_method = "ocr"
-                header["ocr_engine"] = result.engine
-                warnings.append(f"page {page_no}: no native text; OCR ({result.engine}, {result.dpi} dpi) produced {len(words)} words, min confidence {ocr_min_confidence(result):.2f} — verify against the page image")
-            elif page.get_images(full=True):
-                warnings.append(f"page {page_no}: image-only page and no OCR engine installed (pip install rapidocr-onnxruntime); nothing extracted — OCR NOT IMPLEMENTED in this environment")
+        has_images = bool(page.get_images(full=True))
+        native_ref = _find_ref(group_lines(native, y_tol=2.5))[0] if native else None
+        # Some released labels have a defective text layer (REF rendered as IAEFI, D as 0), so the page
+        # image is re-read while the label's identity is still unknown. A continuation page, or a label
+        # whose REF is artwork, keeps its native text when OCR is unavailable or reads nothing.
+        reread_for_ref = bool(native) and has_images and not native_ref and "ref" not in header
+        if not native and not has_images and not page.get_drawings():
+            warnings.append(f"page {page_no}: blank page")
+            continue
+        if not native or reread_for_ref:
+            if has_images and ocr_available():
+                try:
+                    result = ocr_page(page)
+                    recognised = ocr_words(result)
+                except Exception as exc:
+                    recognised = []
+                    warnings.append(f"page {page_no}: OCR failed ({type(exc).__name__}); " + ("native text kept" if native else "page unreadable"))
+                else:
+                    if recognised:
+                        words, page_method = recognised, "ocr"
+                        header["ocr_engine"] = result.engine
+                        warnings.append(f"page {page_no}: {'unreadable native REF' if native else 'no native text'}; OCR ({result.engine}, {result.dpi} dpi) produced {len(words)} words, min confidence {ocr_min_confidence(result):.2f} — verify against the page image")
+                    elif native:
+                        warnings.append(f"page {page_no}: OCR re-read of the page image found no text; native text kept")
+            elif native:
+                warnings.append(f"page {page_no}: REF not found in the text layer and no OCR engine is installed to re-read the page image; native text used")
+            elif has_images:
+                warnings.append(f"page {page_no}: image-only page and no OCR engine installed (install Tesseract or kaizen-crosscheck[ocr]); nothing extracted")
             else:
-                warnings.append(f"page {page_no}: no text found")
+                warnings.append(f"page {page_no}: no text found (text may be drawn as outlines)")
         if words:
-            method = page_method if method == "none" else method
+            method = page_method if method in ("none", page_method) else "mixed"
         lines = group_lines(words, y_tol=2.5)
         if not lines:
+            unreadable.add(page_no)
+            warnings.append(f"page {page_no}: no words recovered; page unreadable")
             continue
         ref, ref_count, ref_line = _find_ref(lines)
         if ref and "ref" not in header:
             header["ref"] = ref
             header["ref_occurrences"] = ref_count
+            ref_words = [w for w in lines[ref_line] if ref in w.text.upper() or w.text.upper().rstrip(":") == "REF"] or lines[ref_line]
+            header["identity_evidence"] = {"page": page_no, "bbox": line_bbox(ref_words).model_dump(), "raw_text": line_text(ref_words), "extraction_method": page_method}
+            header["identity_confidence"] = min(w.confidence for w in ref_words)
         anchor = next((i for i, l in enumerate(lines) if "contents" in line_text(l).lower()), None)
         if anchor is None:
             warnings.append(f"page {page_no}: no 'Contents' heading found; no kit-content lines extracted")
@@ -134,13 +170,15 @@ def parse_label_pdf(path: Path | str) -> Document:
             start = (ref_line + 1) if ref_line is not None else 0
             header["product_name"] = " ".join(line_text(l) for l in lines[start:anchor]).strip()
         region = _contents_region(lines[anchor + 1 :])
-        starters = [w.x0 for line in region for i, w in enumerate(line) if _is_starter(line, i)]
+        region = [_expand_fused_tokens(line) for line in region]
+        starters = [w.x0 for line in region for i, w in enumerate(line) if _is_entry_starter(line, i)]
         columns = _cluster_columns(starters) if starters else [min(w.x0 for l in region for w in l)] if region else [0.0]
         entries = _build_entries(region, columns)
         for col_idx, col_entries in enumerate(entries):
             for k, entry_words in enumerate(col_entries, start=1):
-                raw_text = " ".join(w.text for w in entry_words)
-                text = correct_ocr_text(raw_text)
+                raw_text = " ".join(w.source_text if w.source_text is not None else w.text for w in entry_words).strip()
+                structural_text = " ".join(w.text for w in entry_words)
+                text = correct_ocr_text(structural_text) if page_method == "ocr" else structural_text
                 parsed = parse_label_line(text)
                 if not parsed.matched:
                     warnings.append(f"page {page_no}: unparsed text in contents region skipped: '{raw_text[:60]}'")
@@ -153,7 +191,7 @@ def parse_label_pdf(path: Path | str) -> Document:
                 bbox = _union([line_bbox([w]) for w in entry_words])
                 items.append(
                     DocumentItem(
-                        id=f"{doc_id}:c{col_idx + 1}e{k}",
+                        id=f"{doc_id}:p{page_no}c{col_idx + 1}e{k}",
                         doc_id=doc_id,
                         doc_type=DocType.LABEL,
                         sku=header.get("ref"),
@@ -185,6 +223,7 @@ def parse_label_pdf(path: Path | str) -> Document:
                 )
     pdf.close()
     header["extraction_method"] = method
+    header["unreadable_pages"] = sorted(unreadable)
     if "ref" not in header:
         warnings.append("REF number not found")
     return Document(

@@ -1,7 +1,5 @@
-// Reviewer identity is a server-side session, not browser state. Identity is a BD email address backed
-// by a password; the slot and the blind flag are decided when the session is opened and are enforced by
-// the backend for every request; the token lives in an HttpOnly cookie this code cannot read. Blind mode
-// therefore cannot be switched off from the browser — that is the whole point. See docs/security-review.md.
+// Approved BD identity and run permissions are enforced by the server. The session token lives in
+// an HttpOnly cookie; collaborative reviews have one shared decision and an explicit approval.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api";
 import type { AccountsBackend, ReviewSession, ViewerParams } from "../types";
@@ -13,9 +11,9 @@ interface Ctx {
   error: string | null;
   /** Where passwords are checked: this workspace ("local") or Supabase. Decides the forgotten-password advice. */
   accounts: AccountsBackend;
-  /** Create an account for a BD address. Does not sign in: the slot is chosen on sign-in. */
+  /** Create an account for a BD address; an administrator must approve it before sign-in. */
   signUp: (email: string, password: string) => Promise<void>;
-  signIn: (email: string, password: string, slot: 1 | 2, blind?: boolean) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** Refetch key: changes when the session changes, so pages reload with the right visibility. */
   viewerParams: ViewerParams;
@@ -54,9 +52,9 @@ export function ReviewerProvider({ children }: { children: ReactNode }) {
     await api.signUp(email, password);
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string, slot: 1 | 2, blind?: boolean) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     setError(null);
-    const s = await api.signIn(email, password, slot, blind);
+    const s = await api.signIn(email, password);
     setSession(s);
     setPolicy(s.blind_review_policy);
   }, []);

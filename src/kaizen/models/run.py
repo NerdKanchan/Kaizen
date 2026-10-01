@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .document import Document
 from .result import CheckResult
@@ -23,6 +23,12 @@ class Thresholds(BaseModel):
     floor: float = Field(default=0.60, ge=0.0, le=1.0, description="Below this a pair is not a candidate at all")
     ambiguity_delta: float = Field(default=0.05, ge=0.0, le=1.0, description="Top-2 candidates closer than this → AMBIGUOUS")
     low_confidence: float = Field(default=0.70, ge=0.0, le=1.0, description="Extraction confidence below this is flagged")
+
+    @model_validator(mode="after")
+    def ordered_thresholds(self):
+        if self.floor > self.potential:
+            raise ValueError("candidate floor must not exceed the potential-match threshold")
+        return self
 
 
 class SkuGroup(BaseModel):
@@ -53,6 +59,7 @@ class RunMetadata(BaseModel):
         default_factory=dict, description="Capability → IMPLEMENTED | NOT IMPLEMENTED | PLANNED"
     )
     ai_provider: dict[str, Any] = Field(default_factory=dict, description="Which AI provider (if any) was active; NullProvider by default")
+    extraction_signature: str = Field(default="", description="SHA-256 of extracted identities/items/evidence; different OCR output produces a distinct run")
 
 
 class CoverageFinding(BaseModel):

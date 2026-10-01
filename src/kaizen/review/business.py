@@ -86,6 +86,8 @@ def business_case(run: Run, a: BusinessAssumptions = BusinessAssumptions(), timi
         per_sku[g.sku] = {"rows": len(rs), "needs_validation": n, "auto_cleared": c, "estimated_minutes": round(n * a.minutes_per_validation_row + c * a.minutes_per_cleared_row, 1)}
     def estimate(n_needs: int, n_cleared: int):
         est_ = (n_needs * a.minutes_per_validation_row + n_cleared * a.minutes_per_cleared_row) / skus if skus else 0.0
+        if not rows:
+            est_ = a.baseline_minutes_per_sku
         saved_ = a.baseline_minutes_per_sku - est_
         reduction_ = round(100 * saved_ / a.baseline_minutes_per_sku, 1) if a.baseline_minutes_per_sku else 0.0
         hours_ = round(saved_ * a.skus_per_project * a.reviewers / 60, 1)
@@ -104,4 +106,6 @@ def business_case(run: Run, a: BusinessAssumptions = BusinessAssumptions(), timi
         "Rows and validation counts come from this run; nothing is assumed about accuracy.",
         f"Projection (not a measurement): {confirmable} POTENTIAL rows are strong pairings (candidate score ≥ 0.95, no discrepancy); once a reviewer confirms them as relationships the next run auto-clears them.",
     ]
-    return BusinessCase(skus, rows, cleared, needs, est, saved, reduction, hours_project, annual, reduction >= a.target_reduction_pct, a.baseline_minutes_per_sku, a.hourly_rate, a.skus_per_project, a.projects_per_year, a.reviewers, assumptions, per_sku, confirmable, needs - confirmable, est2, reduction2, hours2, annual2, reduction2 >= a.target_reduction_pct, basis, timing.samples if timing else 0, measured, per_row)
+    if not rows:
+        assumptions.append('No item comparisons were completed; savings cannot be established from this run.')
+    return BusinessCase(skus, rows, cleared, needs, est, saved, reduction, hours_project, annual, bool(rows) and reduction >= a.target_reduction_pct, a.baseline_minutes_per_sku, a.hourly_rate, a.skus_per_project, a.projects_per_year, a.reviewers, assumptions, per_sku, confirmable, needs - confirmable, est2, reduction2, hours2, annual2, bool(rows) and reduction2 >= a.target_reduction_pct, basis, timing.samples if timing else 0, measured, per_row)

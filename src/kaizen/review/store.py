@@ -50,7 +50,7 @@ class RowView:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 MAX_TIMED_SECONDS = 900  # a row left open longer than 15 minutes is not a measurement of review effort

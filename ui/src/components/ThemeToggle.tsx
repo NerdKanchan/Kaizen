@@ -26,6 +26,14 @@ function crossfade() {
 export function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>(() => currentTheme(document.documentElement));
 
+  // Keep every theme control in sync, including the profile page and top bar.
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => setTheme(currentTheme(root)));
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
   // Follow the operating system while no explicit choice is stored.
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");

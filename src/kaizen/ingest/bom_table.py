@@ -1,6 +1,7 @@
 """Parser for BOM exports in XLSX/CSV form (e.g. a JDE grid export). Header row is found by column names."""
 
 import csv
+import re
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from kaizen.ingest.quantity import parse_decimal
 from kaizen.models import DocType, Document, DocumentItem, Evidence
 
 PARSER_NAME = "bom_table"
-PARSER_VERSION = f"1+cat{CATEGORIZER_VERSION}"
+PARSER_VERSION = f"2+cat{CATEGORIZER_VERSION}"
 
 COLUMN_ALIASES: dict[str, set[str]] = {
     "level": {"level"},
@@ -26,7 +27,9 @@ COLUMN_ALIASES: dict[str, set[str]] = {
     "t": {"t"},
     "effective_from": {"effective from", "from", "eff from"},
     "effective_thru": {"effective thru", "thru", "eff thru", "effective to", "to"},
-    "oper_seq": {"oper seq no", "oper seq", "operation sequence", "op seq", "oper seq #", "oper seq no."},
+    "oper_seq": {"oper seq no", "oper seq", "operation sequence", "op seq", "oper seq #", "oper seq#", "oper seq no."},
+    "drawing_number": {"drawing number", "drawing no", "drawing no."},
+    "stocking_type": {"stkg typ", "stocking type"},
     "flags": {"flags"},
 }
 HEADER_KEYS = {
@@ -151,6 +154,8 @@ def parse_bom_table(path: Path | str) -> Document:
                         "effective_thru": eff_thru,
                         "flags": get(row, "flags"),
                         "redlines": [],
+                        "drawing_number": get(row, "drawing_number"),
+                        "stocking_type": get(row, "stocking_type"),
                     },
                     category=category,
                     category_reason=reason,
@@ -170,10 +175,16 @@ def parse_bom_table(path: Path | str) -> Document:
                 )
             )
         break  # first sheet with a header row wins
+    if items and not header.get("parent_item") and re.fullmatch(r"\d{7}[A-Za-z]{1,5}", path.stem):
+        header.update(parent_item=path.stem.upper(), parent_inferred_from="filename", parent_confidence="inferred")
+        for item in items:
+            item.sku = header["parent_item"]
     if not items and not header:
         warnings.append("no BOM header row (Component Item / Description / Quantity) found in any sheet")
     if not header.get("parent_item"):
         warnings.append("parent item not found in header block")
+    elif header.get("parent_confidence") == "inferred":
+        warnings.append(f"parent item {header['parent_item']} inferred from export filename — verify the export belongs to this SKU")
     return Document(
         id=doc_id,
         doc_type=DocType.BOM,

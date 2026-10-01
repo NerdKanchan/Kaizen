@@ -73,7 +73,7 @@ export function SignIn() {
         setConfirm("");
         setNotice("Registration received. An administrator must approve your account before you can sign in.");
       } else {
-        await signIn(address, password, 1);
+        await signIn(address, password);
       }
     } catch (err) {
       setFailed((err as Error).message);

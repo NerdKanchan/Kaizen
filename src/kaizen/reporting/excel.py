@@ -446,9 +446,10 @@ def _metadata_sheet(ws, run: Run) -> None:
     m = run.metadata
     rows: list[tuple[str, Any]] = [("Run ID", m.run_id), ("Timestamp", m.timestamp.isoformat(timespec="seconds")), ("Tool version", m.tool_version)]
     rows += [(f"Parser version: {k}", v) for k, v in m.parser_versions.items()]
+    rows += [("Extraction signature (SHA-256)", m.extraction_signature)]
     rows += [(f"Threshold: {k}", v) for k, v in m.thresholds.model_dump().items()]
     rows += [("Terminology version (SHA-256)", m.terminology_version), ("Terminology relationship count", m.terminology_count), ("Input root", m.input_root), ("Relationships used in this run", ", ".join(run.relationships_used) or "none")]
-    rows += [("Exported at", datetime.now(timezone.utc).isoformat(timespec="seconds"))]  # the Excel import uses this to detect conflicts
+    rows += [("Exported at", datetime.now(timezone.utc).isoformat(timespec="microseconds"))]  # imports must detect decisions changed in the same second
     ws.cell(row=1, column=1, value="Run metadata").font = TITLE_FONT
     for i, (k, v) in enumerate(rows, start=2):
         ws.cell(row=i, column=1, value=k).font = SECTION_FONT

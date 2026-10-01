@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class BBox(BaseModel):
-    """Axis-aligned box in PDF points, origin top-left (PyMuPDF convention)."""
+    """Box in PDF points, origin top-left, in the displayed page orientation."""
 
     x0: float
     y0: float

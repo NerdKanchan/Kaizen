@@ -1,10 +1,11 @@
 """Check 4: PCO ↔ BOM. A PCO describes intended changes; the check asks whether each was applied to each
 affected code's BOM. Coverage rows (is there a BOM for every affected code?) come first and block."""
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from kaizen.checks.base import RECOMMENDED_ACTION, RowIdFactory, header_item, pair_token
 from kaizen.ingest.pco import change_kind
+from kaizen.ingest.quantity import parse_decimal
 from kaizen.matching.ladder import MatchContext, MatchLadder
 from kaizen.matching.normalize import normalize
 from kaizen.models import CheckResult, CheckType, Classification, Discrepancy, DiscrepancyType, DocType, Document, DocumentItem, MatchLevel, Severity, Thresholds
@@ -17,12 +18,7 @@ def _disc(dtype: DiscrepancyType, severity: Severity, detail: str) -> Discrepanc
 
 
 def _num(s: str | None) -> Decimal | None:
-    if s is None or not str(s).strip():
-        return None
-    try:
-        return Decimal(str(s).strip())
-    except InvalidOperation:
-        return None
+    return parse_decimal(s)
 
 
 def _redline_hits(row: DocumentItem, text: str) -> bool:
@@ -33,9 +29,13 @@ def _redline_hits(row: DocumentItem, text: str) -> bool:
 def _qty_seq_check(chg: DocumentItem, row: DocumentItem) -> list[str]:
     problems = []
     qp = _num(chg.attributes.get("qty_proposed"))
+    if chg.attributes.get("qty_proposed") and qp is None:
+        problems.append("proposed quantity is unreadable")
     if qp is not None and (row.quantity is None or row.quantity != qp):
         problems.append(f"quantity {row.quantity if row.quantity is not None else '?'} vs proposed {qp}")
     sp = _num(chg.attributes.get("seq_proposed"))
+    if chg.attributes.get("seq_proposed") and sp is None:
+        problems.append("proposed operation sequence is unreadable")
     if sp is not None:
         rs = _num(row.oper_seq)
         if rs is None or rs != sp:
@@ -89,8 +89,10 @@ def _pick_row(rows: list[DocumentItem], seq_text: str | None) -> tuple[DocumentI
     seq = _num(seq_text)
     if seq is not None:
         hits = [r for r in rows if _num(r.oper_seq) == seq]
-        if hits:
+        if len(hits) == 1:
             return hits[0], ""
+        if len(hits) > 1:
+            return None, f"{len(hits)} rows share oper seq {seq} — reviewer to confirm"
         return rows[0], f" (no row at oper seq {seq}; item appears on seqs {', '.join(r.oper_seq or '?' for r in rows)})"
     seqs = ", ".join(r.oper_seq or "?" for r in rows)
     return None, f"item appears on {len(rows)} rows (oper seqs {seqs}) and the PCO does not say which — reviewer to confirm"
@@ -163,6 +165,10 @@ def _evaluate(chg: DocumentItem, code: str, bom: Document, active: dict[str, lis
         new_rows = active.get(p, [])
         new, pick_note = (_pick_row(new_rows, chg.attributes.get("seq_proposed")) if new_rows else (None, ""))
         if new is None and new_rows:
+            if old is None:
+                source_b, classification = new_rows[0], Classification.POTENTIAL
+                note = f"old item {a} absent; new item {p}: {pick_note}"
+                return CheckResult(row_id=ids.next(), sku=code, check=CheckType.PCO_BOM, source_a=chg, source_b=source_b, classification=classification, match_level=MatchLevel.NONE, score=0.0, explanation=f"{label}: {note}", requires_validation=True)
             new = new_rows[0]
         if old is not None and new is None and _redline_hits(old, p):
             source_b, classification = old, Classification.POTENTIAL
@@ -213,6 +219,9 @@ def _evaluate(chg: DocumentItem, code: str, bom: Document, active: dict[str, lis
                 note = detail
             else:
                 note = f"item {a} at {row.evidence.locator} carries the proposed quantity and sequence — modification applied"
+    if classification is Classification.EXACT and (not bom.items or bom.header.get('unreadable_pages') or bom.header.get('unparsed_rows')):
+        classification = Classification.POTENTIAL
+        note += "; BOM extraction is incomplete — confirm against the source before clearing this change"
     requires = classification is not Classification.EXACT or bool(discrepancies)
     return CheckResult(
         row_id=ids.next(), sku=code, check=CheckType.PCO_BOM, source_a=chg, source_b=source_b, normalized_a=normalize(chg.description).normalized if chg.description else None,

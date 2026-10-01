@@ -1,7 +1,12 @@
 {
-  "version": "2",
+  "version": "3",
   "description": "Ordered rules that decide what a BOM line is. First matching keyword rule wins, then item-number prefix rules, then the quantity default. Patterns are phrase-level on purpose: a single word such as INSERT, INK or BOX must not remove a physical kit component from the comparison. Edit to suit the site; the reason string is reported with every categorisation.",
   "keyword_rules": [
+    {"pattern": "^TAPE,?\\s*MEASU(?:RING|ARING|RE)\\b|^MEASURING TAPE\\b", "category": "PHYSICAL_COMPONENT", "reason": "description identifies a measuring tape, including JDE's MEASUARING spelling; a PK prefix does not make it packaging"},
+    {"pattern": "\\bCSR WRAP\\b|^POLYURETHANE BAG\\b", "category": "PACKAGING", "reason": "description identifies a sterile barrier wrap or packaging bag"},
+    {"pattern": "^FFS POUCH\\b|^FOAM POUCH\\b|^INSERT/SPACER\\b|^SHIP CASE\\b|^GLOVE WALLET$", "category": "PACKAGING", "reason": "description identifies a packing container or spacer"},
+    {"pattern": "^ELECTRONIC L[AE]BELING NOTICE\\b", "category": "DOCUMENT", "reason": "description identifies an electronic labeling notice"},
+    {"pattern": "\\bHANG TAG\\b|^STICKER\\b", "category": "LABEL", "reason": "description identifies an artwork tag or sticker"},
     {"pattern": "\\bQUALITY\\b|\\bINSPECTION\\b|\\bRECORD\\b|FIRST/LAST|FIRST LAST", "category": "QUALITY", "reason": "description mentions a quality/inspection record"},
     {"pattern": "\\bPRODUCING\\b|\\bSTERILI[SZ]", "category": "PROCESS", "reason": "description describes a process step"},
     {"pattern": "TRANSFER RIBBON|PRINT(?:ER)? RIBBON|\\bRIBBON, (?:THERMAL|PRINT)|\\bTONER\\b|\\bINK, PRINT|\\bPRINTER INK\\b", "category": "PROCESS", "reason": "description is a label-printing consumable"},

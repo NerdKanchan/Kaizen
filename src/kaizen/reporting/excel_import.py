@@ -103,55 +103,59 @@ def import_decisions(workspace, run: Run, path: Path | str, slot: int, reviewer:
         wb = openpyxl.load_workbook(Path(path), read_only=False, data_only=True)
     except Exception as e:  # zipfile.BadZipFile, KeyError from a non-xlsx zip, ... — the file is not a workbook
         raise ValueError(f"{Path(path).name} is not a valid .xlsx workbook ({e.__class__.__name__})") from e
-    meta = read_metadata(wb)
-    run_id = run.metadata.run_id
-    if meta.get("Run ID") != run_id:
-        raise ValueError(f"this workbook belongs to run {meta.get('Run ID') or '(unknown)'}, not {run_id}; export the workbook for this run first")
-    exported_at = meta.get("Exported at")
-    result = RoundTripResult(run_id, slot, reviewer, dry_run, force, exported_at)
-    review = review_store or ReviewStore(workspace.db)
-    known = {r.row_id for r in run.results}
-    finalized = set(review.finals(run_id))
-    decision_col, comment_col = SLOT_COLUMNS[slot]
+    try:
+        with workspace.db.transaction():
+            meta = read_metadata(wb)
+            run_id = run.metadata.run_id
+            if meta.get("Run ID") != run_id:
+                raise ValueError(f"this workbook belongs to run {meta.get('Run ID') or '(unknown)'}, not {run_id}; export the workbook for this run first")
+            exported_at = meta.get("Exported at")
+            result = RoundTripResult(run_id, slot, reviewer, dry_run, force, exported_at)
+            review = review_store or ReviewStore(workspace.db)
+            known = {r.row_id for r in run.results}
+            finalized = set(review.finals(run_id))
+            decision_col, comment_col = SLOT_COLUMNS[slot]
 
-    for name in CHECK_SHEETS:
-        if name not in wb.sheetnames:
-            continue
-        sheet = wb[name]
-        cols = _column_map(sheet)
-        if "Row ID" not in cols or decision_col not in cols:
-            continue
-        for r in range(2, sheet.max_row + 1):
-            rid = sheet.cell(row=r, column=cols["Row ID"]).value
-            if rid is None or str(rid).strip() == "":
-                continue
-            rid = str(rid).strip()
-            raw = sheet.cell(row=r, column=cols[decision_col]).value
-            parsed = parse_decision(raw)
-            if parsed == "empty":
-                continue
-            if rid not in known:
-                result.unknown_rows.append(rid)
-                continue
-            if isinstance(parsed, str):
-                result.invalid.append({"row_id": rid, "sheet": name, "value": str(raw), "reason": parsed})
-                continue
-            decision, override = parsed
-            if rid in finalized:
-                result.invalid.append({"row_id": rid, "sheet": name, "value": str(raw), "reason": "row is finalized; the final decision stands (the UI disables decisions on finalized rows too)"})
-                continue
-            comment = str(sheet.cell(row=r, column=cols[comment_col]).value or "").strip() if comment_col in cols else ""
-            existing = review.decisions(run_id, rid).get(slot)
-            if existing and existing.decision == decision and (existing.override_classification or None) == override and (existing.comment or "") == comment:
-                result.unchanged.append(rid)
-                continue
-            if existing and not force and (exported_at is None or existing.decided_at > exported_at):
-                result.conflicts.append({"row_id": rid, "sheet": name, "workbook": raw, "database": existing.decision + (f"→{existing.override_classification}" if existing.override_classification else ""), "database_decided_at": existing.decided_at, "database_reviewer": existing.reviewer})
-                continue
+            for name in CHECK_SHEETS:
+                if name not in wb.sheetnames:
+                    continue
+                sheet = wb[name]
+                cols = _column_map(sheet)
+                if "Row ID" not in cols or decision_col not in cols:
+                    continue
+                for r in range(2, sheet.max_row + 1):
+                    rid = sheet.cell(row=r, column=cols["Row ID"]).value
+                    if rid is None or str(rid).strip() == "":
+                        continue
+                    rid = str(rid).strip()
+                    raw = sheet.cell(row=r, column=cols[decision_col]).value
+                    parsed = parse_decision(raw)
+                    if parsed == "empty":
+                        continue
+                    if rid not in known:
+                        result.unknown_rows.append(rid)
+                        continue
+                    if isinstance(parsed, str):
+                        result.invalid.append({"row_id": rid, "sheet": name, "value": str(raw), "reason": parsed})
+                        continue
+                    decision, override = parsed
+                    if rid in finalized:
+                        result.invalid.append({"row_id": rid, "sheet": name, "value": str(raw), "reason": "row is finalized; change it in the UI to reopen it before importing"})
+                        continue
+                    comment = str(sheet.cell(row=r, column=cols[comment_col]).value or "").strip() if comment_col in cols else ""
+                    existing = review.decisions(run_id, rid).get(slot)
+                    if existing and existing.decision == decision and (existing.override_classification or None) == override and (existing.comment or "") == comment:
+                        result.unchanged.append(rid)
+                        continue
+                    if existing and not force and (exported_at is None or existing.decided_at > exported_at):
+                        result.conflicts.append({"row_id": rid, "sheet": name, "workbook": raw, "database": existing.decision + (f"→{existing.override_classification}" if existing.override_classification else ""), "database_decided_at": existing.decided_at, "database_reviewer": existing.reviewer})
+                        continue
+                    if not dry_run:
+                        review.decide(run_id, rid, slot, reviewer, decision, comment, override, blind=False, timed=False)
+                    result.applied.append(rid)
+
             if not dry_run:
-                review.decide(run_id, rid, slot, reviewer, decision, comment, override, blind=False, timed=False)
-            result.applied.append(rid)
-
-    workspace.db.audit(reviewer, "review.import", f"{run_id}: {result.summary()} ({Path(path).name})")
-    workspace.db.conn.commit()
-    return result
+                workspace.db.audit(reviewer, "review.import", f"{run_id}: {result.summary()} ({Path(path).name})")
+            return result
+    finally:
+        wb.close()

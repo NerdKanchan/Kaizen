@@ -31,6 +31,8 @@ import type {
   VerifyOutcome,
   ViewerParams,
 } from "./types";
+import { supportedRunFiles, uploadProblem } from "./lib/uploads";
+import { notifyDataChanged } from "./lib/dataRefresh";
 
 export class ApiError extends Error {
   status: number;
@@ -55,7 +57,7 @@ function qs(params: Params): string {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, init);
+    res = await fetch(path, { cache: "no-store", ...init });
   } catch (e) {
     throw new ApiError(0, `Cannot reach the API (${path}). Is \`kaizen serve\` running on port 8765? ${(e as Error).message}`);
   }
@@ -63,14 +65,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let msg = `${res.status} ${res.statusText}`;
     try {
       const body = await res.json();
-      if (body && body.detail !== undefined) msg = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      if (body && body.detail !== undefined) {
+        if (typeof body.detail === "string") msg = body.detail;
+        else if (Array.isArray(body.detail)) msg = body.detail.map((issue: { loc?: (string | number)[]; msg?: string }) => `${issue.loc?.slice(1).join(".") || "Input"}: ${issue.msg || "invalid value"}`).join("; ");
+        else msg = JSON.stringify(body.detail);
+      }
     } catch {
       /* non-JSON error body */
     }
     throw new ApiError(res.status, msg);
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  const data = res.status === 204 ? undefined as T : await res.json() as T;
+  if (init?.method && !["GET", "HEAD"].includes(init.method.toUpperCase())) notifyDataChanged(path);
+  return data;
 }
 
 function json(method: string, body: unknown): RequestInit {
@@ -137,8 +144,11 @@ export const api = {
   // ---- runs
   listRuns: () => request<RunListItem[]>("/api/runs"),
   loadDemo: () => request<RunSummary>("/api/demo/load", { method: "POST" }),
-  runFromPath: (path: string) => request<RunSummary>("/api/runs/from-path", json("POST", { path })),
-  uploadRun: (files: File[], name = "") => {
+  runFromPath: (path: string, name = "") => request<RunSummary>("/api/runs/from-path", json("POST", { path, name })),
+  uploadRun: async (files: File[], name = "") => {
+    files = supportedRunFiles(files);
+    const problem = uploadProblem(files);
+    if (problem) throw new ApiError(400, problem);
     const fd = new FormData();
     fd.append("name", name);
     for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);
@@ -164,8 +174,7 @@ export const api = {
   // ever sent, never stored or echoed here — the session lives in an HttpOnly cookie this code cannot read.
   currentSession: () => request<CurrentSession>("/api/sessions/current"),
   signUp: (email: string, password: string) => request<{ ok: boolean; email: string }>("/api/auth/signup", json("POST", { email, password })),
-  signIn: (email: string, password: string, slot: 1 | 2, blind?: boolean) =>
-    request<ReviewSession>("/api/auth/signin", json("POST", { email, password, slot, blind })),
+  signIn: (email: string, password: string) => request<ReviewSession>("/api/auth/signin", json("POST", { email, password })),
   signOut: () => request<{ ended: boolean }>("/api/sessions/current", { method: "DELETE" }),
   relationshipFromRow: (runId: string, body: FromRowBody) => request<Relationship>(`/api/runs/${enc(runId)}/relationships/from-row`, json("POST", body)),
 
@@ -197,7 +206,7 @@ export const api = {
   listActionItems: (q: { status?: string; run_id?: string }) => request<ActionItem[]>(`/api/action-items${qs(q)}`),
   patchActionItem: (id: string, body: { status?: ActionStatus; owner?: string; by: string; note?: string }) =>
     request<ActionItem>(`/api/action-items/${enc(id)}`, json("PATCH", body)),
-  verifyAndClose: (runId: string) => request<VerifyOutcome>(`/api/runs/${enc(runId)}/verify-and-close`, { method: "POST" }),
+  verifyAndClose: (runId: string, against?: string) => request<VerifyOutcome>(`/api/runs/${enc(runId)}/verify-and-close${against ? `?against=${enc(against)}` : ""}`, { method: "POST" }),
   businessCase: (runId: string, p: BusinessParams) => request<BusinessCase>(`/api/runs/${enc(runId)}/business-case${qs(p as Params)}`),
 
   // ---- exports

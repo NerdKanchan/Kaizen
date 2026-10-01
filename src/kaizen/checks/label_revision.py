@@ -5,12 +5,13 @@ changed, quantity changed, REF changed) is classified EXPECTED when a PCO-derive
 otherwise UNEXPECTED_LABEL_CHANGE. Expectations that nothing on the new label satisfies are
 EXPECTED_CHANGE_ABSENT. Unchanged lines are auto-cleared."""
 
-from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass, replace
+from decimal import Decimal
 
 from kaizen.checks.base import RowIdFactory, header_item, pair_token
 from kaizen.checks.pairing import disc
 from kaizen.ingest.bom_categorize import categorize
+from kaizen.ingest.quantity import parse_decimal
 from kaizen.matching.assignment import assign
 from kaizen.matching.ladder import MatchContext, MatchLadder
 from kaizen.matching.normalize import normalize
@@ -54,10 +55,7 @@ def expected_changes_from_pcos(pcos: list[Document], sku: str, boms: list[Docume
                 continue
             kind = chg.attributes.get("change_kind")
             qty = chg.attributes.get("qty_proposed") or None
-            try:
-                q = Decimal(qty) if qty else None
-            except InvalidOperation:
-                q = None
+            q = parse_decimal(qty)
             if categorize(chg.item_number, chg.description or "", q)[0] is not ItemCategory.PHYSICAL_COMPONENT:
                 continue
             src = f"{number} {chg.attributes.get('change_key', kind)}"
@@ -79,10 +77,8 @@ def _q(q: Decimal | None) -> str:
 def _same_qty(a: Decimal | None, b: str | Decimal | None) -> bool:
     if a is None or b is None:
         return False
-    try:
-        return a == (b if isinstance(b, Decimal) else Decimal(str(b)))
-    except InvalidOperation:
-        return False
+    value = parse_decimal(str(b))
+    return a.is_finite() and value is not None and a == value
 
 
 class _Matcher:
@@ -105,10 +101,17 @@ class _Matcher:
 
 
 def run_label_revision_check(old: Document, new: Document, expected: list[ExpectedChange], ladder: MatchLadder, thresholds: Thresholds, sku: str | None = None) -> list[CheckResult]:
+    expected = [replace(e, consumed=False) for e in expected]
     sku = sku or new.sku or old.sku or "UNKNOWN"
     ids = RowIdFactory(sku, "V", pair_token(old.id, new.id))
     fit = _Matcher(ladder, sku)
     results: list[CheckResult] = [_header_row(old, new, sku, ids)]
+    for doc in (old, new):
+        if not doc.items or doc.header.get('unreadable_pages'):
+            detail = f"Label revision extraction incomplete ({doc.path}); changes cannot be confirmed against the source. " + "; ".join(doc.warnings)
+            results.append(CheckResult(row_id=ids.next(), sku=sku, check=CheckType.LABEL_REVISION, role='header', source_a=header_item(doc, 'label'), classification=Classification.MISSING, match_level=MatchLevel.NONE, score=0.0, explanation=detail, discrepancies=[disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.BLOCKER, detail)], requires_validation=True))
+    if len(results) > 1:
+        return results
     old_items, new_items = list(old.items), list(new.items)
     na = [normalize(i.description) for i in old_items]
     nb = [normalize(i.description) for i in new_items]
@@ -132,6 +135,9 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
                 exp.consumed = True
                 cls, note = confirm_note(exp, fit.strict(exp.description, o))
                 results.append(mk("change", o, None, cls, f"EXPECTED REMOVED: '{o.description}' (qty {_q(o.quantity)}) is no longer on the new label, {note}"))
+            elif exp is not None and exp.kind == "SUBSTITUTE" and any(fit.fits(exp.description, n) for n in new_items):
+                cls, note = confirm_note(exp, fit.strict(exp.old_description, o))
+                results.append(mk("change", o, None, cls, f"EXPECTED REMOVED for substitution: '{o.description}' replaced on the new label, {note}"))
             else:
                 detail = f"REMOVED: '{o.description}' (qty {_q(o.quantity)}) is on the old label but not on the new label, and no PCO change explains it"
                 results.append(mk("change", o, None, Classification.MISMATCH, detail, [unexpected(detail)]))
@@ -147,19 +153,24 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
         parts: list[str] = []
         discrepancies = []
         cls = Classification.EXACT
+        substitution = None
         if not desc_same:
             exp = next((e for e in expected if not e.consumed and e.kind == "SUBSTITUTE" and fit.fits(e.description, n) and (not e.old_description or fit.fits(e.old_description, o))), None)
             if exp is not None:
+                substitution = exp
                 exp.consumed = True
                 c, note = confirm_note(exp, fit.strict(exp.description, n))
                 cls = c if c is Classification.POTENTIAL else cls
                 parts.append(f"EXPECTED DESCRIPTION CHANGED: '{o.description}' → '{n.description}' {note}")
+                if exp.quantity is not None and not _same_qty(n.quantity, exp.quantity):
+                    detail = f"Substitution quantity {_q(n.quantity)} does not match PCO quantity {exp.quantity} ({exp.source})"
+                    discrepancies.append(disc(DiscrepancyType.EXPECTED_CHANGE_ABSENT, Severity.MAJOR, detail))
             else:
                 detail = f"DESCRIPTION CHANGED: '{o.description}' → '{n.description}' ({p.outcome.reason}); no PCO change explains it"
                 parts.append(detail)
                 discrepancies.append(unexpected(detail))
         if not qty_same:
-            exp = next((e for e in expected if not e.consumed and e.kind == "QTY" and fit.fits(e.description, n) and _same_qty(n.quantity, e.quantity)), None)
+            exp = substitution if substitution is not None and _same_qty(n.quantity, substitution.quantity) else next((e for e in expected if not e.consumed and e.kind == "QTY" and fit.fits(e.description, n) and _same_qty(n.quantity, e.quantity)), None)
             if exp is not None:
                 exp.consumed = True
                 c, note = confirm_note(exp, fit.strict(exp.description, n))
@@ -199,13 +210,14 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
         if e.consumed:
             continue
         present_new = next((n for n in new_items if fit.fits(e.description, n, strict=True)), None)
-        if e.kind == "ADD" and present_new is not None:
+        qty_applied = e.quantity is None or (present_new is not None and _same_qty(present_new.quantity, e.quantity))
+        if e.kind == "ADD" and present_new is not None and qty_applied:
             results.append(mk("change", e.source_item, present_new, Classification.EXACT, f"EXPECTED ADD already present: '{present_new.description}' is on both revisions ({e.source})"))
         elif e.kind == "REMOVE" and present_new is None:
             results.append(mk("change", e.source_item, None, Classification.EXACT, f"EXPECTED REMOVE already absent: '{e.description}' is on neither revision ({e.source})"))
         elif e.kind == "QTY" and present_new is not None and _same_qty(present_new.quantity, e.quantity):
             results.append(mk("change", e.source_item, present_new, Classification.EXACT, f"EXPECTED QUANTITY already applied: '{present_new.description}' qty {_q(present_new.quantity)} ({e.source})"))
-        elif e.kind == "SUBSTITUTE" and present_new is not None and (not e.old_description or not any(fit.fits(e.old_description, o, strict=True) for o in new_items)):
+        elif e.kind == "SUBSTITUTE" and present_new is not None and qty_applied and (not e.old_description or not any(fit.fits(e.old_description, o, strict=True) for o in new_items)):
             results.append(mk("change", e.source_item, present_new, Classification.EXACT, f"EXPECTED SUBSTITUTE already applied: '{present_new.description}' on the new label ({e.source})"))
         else:
             what = {"ADD": f"'{e.description}' should have been added", "REMOVE": f"'{e.description}' should have been removed but is still on the new label", "QTY": f"'{e.description}' should show quantity {e.quantity}", "SUBSTITUTE": f"'{e.description}' should replace '{e.old_description or 'the previous item'}'"}[e.kind]
@@ -216,6 +228,9 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
 
 def _header_row(old: Document, new: Document, sku: str, ids: RowIdFactory) -> CheckResult:
     a, b = header_item(old, "old label"), header_item(new, "new label")
+    if not old.sku or not new.sku:
+        detail = "One or both label REF identities could not be extracted; verify the source labels."
+        return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.LABEL_REVISION, role='header', source_a=a, source_b=b, classification=Classification.MISSING, match_level=MatchLevel.NONE, score=0.0, explanation=detail, discrepancies=[disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.BLOCKER, detail)], requires_validation=True)
     problems = []
     if (old.sku or "") != (new.sku or ""):
         problems.append(f"REF changed from {old.sku} to {new.sku}")

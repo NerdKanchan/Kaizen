@@ -80,9 +80,9 @@ export function CardHead({ title, description, actions, icon, count, className =
   );
 }
 
-export function PageHeader({ title, description, actions, meta, back }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; meta?: ReactNode; back?: { to: string; label: string } }) {
+export function PageHeader({ title, description, actions, meta, back, className = "" }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; meta?: ReactNode; back?: { to: string; label: string }; className?: string }) {
   return (
-    <div className="page-heading flex flex-wrap items-start gap-x-6 gap-y-3 mb-5">
+    <div className={`page-heading flex flex-wrap items-start gap-x-6 gap-y-3 mb-5 ${className}`}>
       <div className="head-title">
         {back && (
           <Link to={back.to} className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-brand-600 no-underline mb-1">

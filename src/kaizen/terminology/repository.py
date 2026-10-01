@@ -119,65 +119,68 @@ class TerminologyRepository:
     # ---- writes ----------------------------------------------------------------------------------
     def _insert(self, rel: Relationship, change_type: str, changed_by: str, change_note: str) -> None:
         self.conn.execute(
-            "INSERT OR REPLACE INTO relationships VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO relationships (id,canonical,aliases,scope,doc_types,item_anchors,provenance,created_by,created_at,updated_at,active,notes,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (rel.id, rel.canonical, json.dumps(rel.aliases), rel.scope, json.dumps([d.value for d in rel.doc_types]), json.dumps(rel.item_anchors), rel.provenance, rel.created_by, rel.created_at.isoformat(), rel.updated_at.isoformat(), int(rel.active), rel.notes, rel.version),
         )
         self._record_version(rel, change_type, changed_by, change_note)
 
     def _record_version(self, rel: Relationship, change_type: str, changed_by: str, change_note: str) -> None:
         self.conn.execute(
-            "INSERT OR REPLACE INTO relationship_versions VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO relationship_versions (id,version,payload,change_type,changed_by,changed_at,change_note) VALUES (?,?,?,?,?,?,?)",
             (rel.id, rel.version, rel.model_dump_json(), change_type, changed_by, _now().isoformat(), change_note),
         )
         self.conn.execute("INSERT INTO audit (at, actor, action, detail) VALUES (?,?,?,?)", (_now().isoformat(), changed_by, f"relationship.{change_type}", f"{rel.id} v{rel.version}: {change_note}"))
 
     def create(self, canonical: str, aliases=(), scope: str = "global", doc_types=(), item_anchors=(), provenance: str = "manual", created_by: str = "system", notes: str = "", rel_id: str | None = None, active: bool = True) -> Relationship:
         now = _now()
-        with self.db.lock:
+        with self.db.transaction():
             rel = Relationship(id=rel_id or self.next_id(), canonical=canonical, aliases=list(aliases), scope=scope, doc_types=[DocType(d) for d in doc_types], item_anchors=list(item_anchors), provenance=provenance, created_by=created_by, created_at=now, updated_at=now, notes=notes, version=1, active=active)
+            if self.get(rel.id) is not None or self.history(rel.id):
+                raise ValueError(f"Relationship {rel.id} already exists or has recorded history; use a new ID.")
             self._insert(rel, "create", created_by, notes or "created")
             self.conn.commit()
         return rel
 
     def update(self, rel_id: str, changed_by: str, change_note: str = "", **fields: Any) -> Relationship:
-        current = self.get(rel_id)
-        if current is None:
-            raise KeyError(rel_id)
         fields.pop("id", None)
         fields.pop("version", None)
         if "doc_types" in fields:
             fields["doc_types"] = [DocType(d) for d in fields["doc_types"]]
-        with self.db.lock:
+        with self.db.transaction():
+            current = self.get(rel_id)
+            if current is None:
+                raise KeyError(rel_id)
             updated = Relationship.model_validate({**current.model_dump(), **fields, "updated_at": _now(), "version": current.version + 1})
             self._insert(updated, "update", changed_by, change_note or "updated")
             self.conn.commit()
         return updated
 
     def deactivate(self, rel_id: str, changed_by: str, change_note: str = "") -> Relationship:
-        rel = self.update(rel_id, changed_by, change_note or "deactivated", active=False)
-        self.conn.execute("UPDATE relationship_versions SET change_type = 'deactivate' WHERE id = ? AND version = ?", (rel.id, rel.version))
-        self.conn.commit()
+        with self.db.transaction():
+            rel = self.update(rel_id, changed_by, change_note or "deactivated", active=False)
+            self.conn.execute("UPDATE relationship_versions SET change_type = 'deactivate' WHERE id = ? AND version = ?", (rel.id, rel.version))
         return rel
 
     def activate(self, rel_id: str, changed_by: str, change_note: str = "") -> Relationship:
-        rel = self.update(rel_id, changed_by, change_note or "activated", active=True)
-        self.conn.execute("UPDATE relationship_versions SET change_type = 'activate' WHERE id = ? AND version = ?", (rel.id, rel.version))
-        self.conn.commit()
+        with self.db.transaction():
+            rel = self.update(rel_id, changed_by, change_note or "activated", active=True)
+            self.conn.execute("UPDATE relationship_versions SET change_type = 'activate' WHERE id = ? AND version = ?", (rel.id, rel.version))
         return rel
 
     def delete(self, rel_id: str, changed_by: str, change_note: str = "") -> None:
-        current = self.get(rel_id)
-        if current is None:
-            raise KeyError(rel_id)
-        tomb = current.model_copy(update={"version": current.version + 1, "updated_at": _now(), "active": False})
-        self._record_version(tomb, "delete", changed_by, change_note or "deleted")
-        self.conn.execute("DELETE FROM relationships WHERE id = ?", (rel_id,))
-        self.conn.commit()
+        with self.db.transaction():
+            current = self.get(rel_id)
+            if current is None:
+                raise KeyError(rel_id)
+            tomb = current.model_copy(update={"version": current.version + 1, "updated_at": _now(), "active": False})
+            self._record_version(tomb, "delete", changed_by, change_note or "deleted")
+            self.conn.execute("DELETE FROM relationships WHERE id = ?", (rel_id,))
 
     # ---- run linkage -----------------------------------------------------------------------------
-    def record_run_usage(self, run_id: str, usage: dict[str, int]) -> None:
+    def record_run_usage(self, run_id: str, usage: dict[str, int], snapshot: list[dict] | None = None) -> None:
         rows = []
-        for rel in self.list(active_only=True):
+        relationships = [Relationship.model_validate(r) for r in snapshot] if snapshot is not None else self.list(active_only=True)
+        for rel in relationships:
             rows.append((run_id, rel.id, rel.version, int(usage.get(rel.id, 0))))
         known = {r[1] for r in rows}
         for rel_id, count in usage.items():
@@ -185,13 +188,19 @@ class TerminologyRepository:
                 rel = self.get(rel_id)
                 if rel:
                     rows.append((run_id, rel_id, rel.version, int(count)))
-        self.conn.executemany("INSERT OR REPLACE INTO run_relationships VALUES (?,?,?,?)", rows)
+        self.conn.execute("DELETE FROM run_relationships WHERE run_id = ?", (run_id,))
+        self.conn.executemany("INSERT INTO run_relationships (run_id,relationship_id,version,used_count) VALUES (?,?,?,?)", rows)
         self.conn.commit()
 
     def relationships_for_run(self, run_id: str) -> list[RunRelationship]:
         out = []
+        pinned = {}
+        record = self.conn.execute("SELECT json_path FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if record and Path(record['json_path']).is_file():
+            payload = json.loads(Path(record['json_path']).read_text(encoding='utf-8'))
+            pinned = {r['id']: Relationship.model_validate(r) for r in payload.get('terminology_snapshot', [])}
         for r in self.conn.execute("SELECT * FROM run_relationships WHERE run_id = ? ORDER BY relationship_id", (run_id,)):
-            rel = self.get_version(r["relationship_id"], r["version"])
+            rel = pinned.get(r["relationship_id"]) or self.get_version(r["relationship_id"], r["version"])
             if rel is not None:
                 out.append(RunRelationship(rel, r["used_count"]))
         return out

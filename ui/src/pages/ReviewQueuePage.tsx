@@ -13,6 +13,7 @@ import { PAGE_SIZE, queueParams, queueQueryFromParams } from "../lib/queue";
 import { useReviewer } from "../lib/reviewer";
 import { useToast } from "../lib/toast";
 import { errorMessage, useAsync } from "../lib/useAsync";
+import { useDataRefresh } from "../lib/dataRefresh";
 import { CHECK_TYPES, CLASSIFICATIONS, DISCREPANCY_TYPES, REVIEW_STATES, ROLES, SEVERITIES, type ResultRow, type SideSummary } from "../types";
 
 const CHECK_LABEL: Record<string, string> = { BOM_LABEL: "BOM to label", BOM_DRAWING: "BOM to drawing", LABEL_DRAWING: "Label to drawing", PCO_BOM: "PCO to BOM", LABEL_REVISION: "Label revision" };
@@ -28,6 +29,7 @@ export default function ReviewQueuePage() {
   const run = useAsync(() => api.getRun(runId), [runId]);
   const query = queueQueryFromParams(sp, viewerParams);
   const page = useAsync(() => api.getResults(runId, query), [runId, sp.toString(), viewerParams.viewer, viewerParams.blind]);
+  useDataRefresh(() => { run.reload(); page.reload(); }, runId);
 
   const [search, setSearch] = useState(sp.get("q") ?? "");
   useEffect(() => setSearch(sp.get("q") ?? ""), [sp]);
@@ -41,7 +43,7 @@ export default function ReviewQueuePage() {
   };
   const clear = () => setSp(new URLSearchParams(), { replace: true });
   const open = (rowId: string) => nav(`/runs/${enc(runId)}/rows/${enc(rowId)}?${queueParams(sp).toString()}`);
-  const activeFilters = ["sku", "check", "discrepancy", "severity", "classification", "state", "role", "q"].filter((k) => sp.get(k)).length + (sp.get("nv") === "0" ? 1 : 0);
+  const activeFilters = ["sku", "check", "discrepancy", "severity", "classification", "engine_classification", "unresolved", "state", "role", "q"].filter((k) => sp.get(k)).length + (sp.get("nv") === "0" ? 1 : 0);
 
   // ---- keyboard: j/k highlight a row, Enter opens it, ? help (no animation on keyboard moves)
   const rows = page.data?.rows ?? [];
@@ -166,15 +168,17 @@ export default function ReviewQueuePage() {
                 Search
               </Button>
             </form>
-            <label className="flex items-center gap-2 text-sm h-8 select-none" title="Show only comparisons flagged for review.">
+            <label className="flex items-center gap-2 text-sm h-8 select-none" title="Show rows awaiting review, approval or more information.">
               <input type="checkbox" className="accent-accent-500 w-4 h-4" checked={nvOn} onChange={(e) => set("nv", e.target.checked ? "" : "0")} />
-              Flagged only
+              Pending only
             </label>
             {activeFilters > 0 && (
               <Button size="sm" variant="ghost" onClick={clear} icon={<X size={14} />}>
                 Clear {activeFilters} filter{activeFilters === 1 ? "" : "s"}
               </Button>
             )}
+            {sp.get("engine_classification") && <Button size="sm" variant="ghost" onClick={() => set("engine_classification", "")} icon={<X size={14} />}>Engine: {sp.get("engine_classification")}</Button>}
+            {sp.get("unresolved") === "1" && <Button size="sm" variant="ghost" onClick={() => set("unresolved", "")} icon={<X size={14} />}>Unresolved findings</Button>}
             {viewerParams.blind && (
               <Badge tone="info" dot={false} className="ml-auto">
                 <EyeSlash size={14} /> Blind: reviewer 1 decisions hidden until you decide
@@ -212,7 +216,7 @@ export default function ReviewQueuePage() {
           </div>
           {page.loading && !page.data && <TableSkeleton rows={8} cols={7} />}
           {page.data && page.data.rows.length === 0 && (
-            <EmptyState icon={<ListChecks size={36} />} title="No rows match these filters" description={nvOn ? "Every comparison matching the other filters was auto-cleared. Turn off “Flagged only” to see them." : "Try fewer filters."} action={activeFilters > 0 ? <Button onClick={clear}>Clear filters</Button> : undefined} />
+            <EmptyState icon={<ListChecks size={36} />} title="No rows match these filters" description={nvOn ? "No pending reviews match these filters. Turn off “Pending only” to see approved and automatically cleared rows." : "Try fewer filters."} action={activeFilters > 0 ? <Button onClick={clear}>Clear filters</Button> : undefined} />
           )}
           {page.data && page.data.rows.length > 0 && (
             <div className="overflow-x-auto">
@@ -232,7 +236,7 @@ export default function ReviewQueuePage() {
                   {page.data.rows.map((row, i) => (
                     <tr key={row.row_id} className="clickable" data-selected={hi === i ? "true" : undefined} onClick={() => open(row.row_id)}>
                       <td>
-                        <SeverityBadge value={row.engine.severity} />
+                        <SeverityBadge value={row.current_severity} />
                       </td>
                       <td className="whitespace-nowrap">
                         <Link className="mono font-medium underline" to={`/runs/${enc(runId)}/rows/${enc(row.row_id)}?${queueParams(sp).toString()}`} onClick={e => e.stopPropagation()} aria-label={`Review ${row.sku} ${CHECK_LABEL[row.check] ?? row.check} comparison ${offset + i + 1}`}>{row.sku}</Link>
@@ -247,17 +251,17 @@ export default function ReviewQueuePage() {
                         <Side s={row.b} />
                       </td>
                       <td className="whitespace-nowrap">
-                        <ClassificationBadge value={row.engine.classification} title="Automated result" />
+                        <ClassificationBadge value={row.effective_classification} title="Current review classification" />
                         {row.effective_classification !== row.engine.classification && (
                           <div className="text-xs text-ink-3 mt-1 flex items-center gap-1">
-                            reviewer <ClassificationBadge value={row.effective_classification} />
+                            engine <ClassificationBadge value={row.engine.classification} />
                           </div>
                         )}
                         {row.engine.relationship_id && <div className="text-xs text-ink-3 mono mt-1">{row.engine.relationship_id}</div>}
                       </td>
                       <td>
                         <div className="flex flex-wrap gap-1 max-w-[12rem]">
-                          {row.engine.discrepancies.map((t) => (
+                          {row.current_discrepancies.map(({ type: t }) => (
                             <span key={t} className="chip">
                               {issueLabel(t)}
                             </span>

@@ -121,7 +121,7 @@ export default function BusinessCasePage() {
                     {!d.meets_target && ` The estimate is ${(target - d.reduction_pct).toFixed(1)} percentage points below the target.`}
                   </p>
                   <p className="text-sm text-ink-3 mt-2 max-w-[72ch]">
-                    {d.needs_validation} of {d.rows} comparisons need review ({pct(d.needs_validation, d.rows)}%). Estimates use the review times shown below.
+                    The engine flagged {d.needs_validation} of {d.rows} comparisons before review ({pct(d.needs_validation, d.rows)}%). Estimates use the review times shown below; current approvals appear in the overview.
                   </p>
                 </div>
                 <div className="p-5">
@@ -153,12 +153,12 @@ export default function BusinessCasePage() {
             <div className="grid xl:grid-cols-2 gap-x-6 gap-y-6 items-start">
               <div>
                 <SectionTitle>Current estimate</SectionTitle>
-                <p className="text-sm text-ink-3 mb-3 max-w-[56ch]">Based on this run’s results and the current assumptions.</p>
+                <p className="text-sm text-ink-3 mb-3 max-w-[56ch]">Based on the original engine results and current review-time assumptions. This estimates the full review effort for the run.</p>
                 <div className="business-metrics">
                   <Stat label="SKUs" value={d.skus} />
                   <Stat label="Reviewable comparisons" value={d.rows} sub="item and change rows" />
                   <Stat label="Auto-cleared" value={d.auto_cleared} tone="good" />
-                  <Stat label="Flagged for review" value={d.needs_validation} tone="bad" />
+                  <Stat label="Originally flagged" value={d.needs_validation} tone="bad" />
                   <Stat label="Estimated minutes per SKU" value={d.estimated_minutes_per_sku} sub={`baseline ${d.baseline_minutes_per_sku}`} />
                   <Stat label="Reduction" value={`${d.reduction_pct}%`} tone={d.meets_target ? "good" : "bad"} sub={d.meets_target ? `meets the ${target}% target` : `below the ${target}% target`} />
                   <Stat label="Minutes saved per SKU" value={d.minutes_saved_per_sku} tone={d.minutes_saved_per_sku >= 0 ? "good" : "bad"} />

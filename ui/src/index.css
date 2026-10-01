@@ -943,3 +943,81 @@
   .terminology-search > .relative { flex: 1 1 180px; min-width: 0; max-width: 100%; }
   .terminology-search .input { width: 100%; }
 }
+
+/* Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V4
+ * Navigation disclosures, account profile and overview actions use docs/design/DESIGN.md. */
+@layer components {
+  .nav-tree > .sidebar-section { margin-top: var(--space-md); }
+  .nav-tree > .sidebar-section:first-child { margin-top: var(--space-xs); }
+  .sidebar-section-toggle { width: 100%; display: flex; align-items: center; gap: var(--space-xs); min-height: 34px; padding: 6px 10px; border-radius: var(--radius-input); color: rgb(var(--c-rail-ink)); font-size: 13px; font-weight: 550; text-align: left; }
+  .sidebar-section-toggle > svg { flex-shrink: 0; }
+  .sidebar-section-toggle > svg:last-child { margin-left: auto; color: rgb(var(--c-rail-muted)); }
+  .sidebar-section-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar-section-toggle:hover { background: rgb(var(--c-nav-selected)); }
+  .sidebar-section-toggle:focus-visible, .account-avatar:focus-visible { outline: 2px solid var(--accent-focus); outline-offset: 2px; }
+  .nav-tree .nav-item { min-height: 34px; padding: 7px 10px; margin-bottom: 2px; gap: 10px; font-size: 13px; }
+  .sidebar-run-group, .sidebar-run-group + .sidebar-run-group { margin-top: 2px; }
+  .sidebar-run-group > .sidebar-section-toggle { font-weight: 450; color: rgb(var(--c-rail-muted)); }
+  .sidebar-run-group.contains-active > .sidebar-section-toggle { color: rgb(var(--c-rail-ink)); font-weight: 550; }
+  .sidebar-run-pages { margin: 2px 0 6px 18px; padding-left: 7px; border-left: 1px solid rgb(var(--c-nav-rule)); }
+  .sidebar-run-pages .nav-item { font-size: 12px; gap: 8px; }
+  .sidebar-analysis.sidebar-section { margin-top: 2px; }
+  .sidebar-analysis > .sidebar-section-toggle { font-size: 12px; font-weight: 450; color: rgb(var(--c-rail-muted)); }
+  .sidebar-hint { padding: 8px 10px; }
+  .sidebar-hint button { text-decoration: underline; }
+  .nav-compact { display: none; }
+  .compact-run-links { border-top: 1px solid rgb(var(--c-nav-rule)); padding-top: var(--space-xs); margin-top: var(--space-xs); }
+  .sidebar-footer { padding-top: var(--space-xs); margin: var(--space-sm); }
+  .sidebar-footer .nav-item { width: 100%; margin: 0; }
+  .account-avatar { flex-shrink: 0; text-decoration: none; }
+  .account-avatar:hover { border-color: rgb(var(--c-ink-3)); color: rgb(var(--c-ink)); }
+  .overview-heading .head-title { flex: 0 1 auto; min-width: 0; }
+  .overview-review-action { padding-top: 2px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .overview-review-action > span { font-size: 12px; color: rgb(var(--c-ink-3)); }
+  .queue-count { display: inline-flex; align-items: center; justify-content: center; padding: 1px 6px; border-radius: 4px; background: rgb(var(--c-accent-ink) / .1); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .profile-page { max-width: 1040px; }
+  .profile-identity { display: flex; align-items: center; gap: var(--space-lg); padding: var(--space-lg); margin-bottom: var(--space-lg); }
+  .profile-avatar { display: grid; place-items: center; flex-shrink: 0; width: 64px; height: 64px; border: 1px solid rgb(var(--c-line)); border-radius: 50%; background: rgb(var(--c-surface-2)); color: rgb(var(--c-ink-2)); font-size: 22px; font-weight: 550; }
+  .profile-identity > div { min-width: 0; }
+  .profile-identity h2 { font-size: 20px; font-weight: 550; }
+  .profile-identity p { color: rgb(var(--c-ink-3)); font-size: 13px; overflow-wrap: anywhere; margin-block: 4px 8px; }
+  .profile-role { font-size: 12px; color: rgb(var(--c-ink-2)); }
+  .profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--space-md); }
+  .profile-details { padding: 4px 20px 16px; }
+  .profile-details > div { display: grid; grid-template-columns: minmax(0, 100px) minmax(0, 1fr); gap: var(--space-sm); padding-block: 10px; font-size: 13px; }
+  .profile-details dt { color: rgb(var(--c-ink-3)); }
+  .profile-details dd { overflow-wrap: anywhere; }
+  .profile-note { color: rgb(var(--c-ink-3)); font-size: 12px; line-height: 1.7; padding: 0 20px 20px; }
+  .profile-preference { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-md); padding: var(--space-md) 20px 20px; }
+  .profile-preference > span { display: flex; align-items: center; gap: var(--space-sm); font-size: 13px; }
+  .profile-preference strong { font-weight: 500; }
+  .profile-preference small { display: block; font-size: 12px; color: rgb(var(--c-ink-3)); margin-top: 4px; }
+  .profile-run-links { padding: 4px 20px 16px; }
+  .profile-run-links a { display: flex; align-items: center; gap: var(--space-sm); padding-block: 12px; font-size: 13px; }
+  .profile-run-links a strong { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .profile-signout { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-md); padding-top: var(--space-lg); margin-top: var(--space-lg); border-top: 1px solid rgb(var(--c-line)); }
+  .profile-signout > span { min-width: 0; font-size: 12px; color: rgb(var(--c-ink-3)); overflow-wrap: anywhere; }
+}
+@media (min-width: 1024px) {
+  .nav-collapsed .nav-tree { display: none; }
+  .nav-collapsed .nav-compact { display: block; }
+}
+@media (max-width: 1023px) {
+  .account-avatar { display: grid; }
+  .overview-heading { flex-direction: row; }
+}
+@media (max-width: 767px) {
+  .profile-grid { grid-template-columns: minmax(0, 1fr); }
+  .profile-identity { gap: var(--space-md); padding: var(--space-md); }
+  .profile-avatar { width: 48px; height: 48px; font-size: 18px; }
+  .profile-identity h2 { font-size: 18px; }
+  .profile-details > div { grid-template-columns: minmax(0, 80px) minmax(0, 1fr); }
+  .profile-details, .profile-run-links { padding-inline: var(--space-md); }
+  .profile-note, .profile-preference { padding-inline: var(--space-md); }
+  .overview-heading { flex-direction: column; }
+  .overview-review-action { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+}
+@media (max-width: 479px) {
+  .profile-details > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .profile-details dt { font-size: 12px; }
+}

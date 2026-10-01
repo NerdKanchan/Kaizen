@@ -9,7 +9,7 @@ from typing import Any
 
 from kaizen.models import ItemCategory
 
-CATEGORIZER_VERSION = "2"
+CATEGORIZER_VERSION = "3"
 _RULES_PATH = Path(__file__).with_name("bom_category_rules.json")
 
 

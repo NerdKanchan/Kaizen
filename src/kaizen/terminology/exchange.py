@@ -92,7 +92,7 @@ def export_csv(repo: TerminologyRepository, path: Path | str) -> Path:
 def _apply_rows(repo: TerminologyRepository, rows: list[dict[str, Any]], imported_by: str, source: str) -> ImportResult:
     result = ImportResult()
     for n, row in enumerate(rows, start=2):
-        canonical = (row.get("Canonical") or "").strip() if row.get("Canonical") is not None else ""
+        canonical = str(row.get("Canonical") or "").strip()
         if not canonical:
             continue
         rel_id = (str(row.get("ID")).strip() if row.get("ID") not in (None, "") else "")
@@ -129,13 +129,23 @@ def _apply_rows(repo: TerminologyRepository, rows: list[dict[str, Any]], importe
 
 def import_xlsx(repo: TerminologyRepository, path: Path | str, imported_by: str = "import") -> ImportResult:
     wb = load_workbook(path, data_only=True)
-    ws = wb["Relationships"] if "Relationships" in wb.sheetnames else wb.worksheets[0]
-    header = [c.value for c in ws[1]]
-    rows = [dict(zip(header, r)) for r in ws.iter_rows(min_row=2, values_only=True)]
-    return _apply_rows(repo, rows, imported_by, Path(path).name)
+    try:
+        ws = wb["Relationships"] if "Relationships" in wb.sheetnames else wb.worksheets[0]
+        header = [c.value for c in ws[1]]
+        if 'Canonical' not in header:
+            raise ValueError('Missing Canonical column. Use a Kaizen terminology export.')
+        rows = [dict(zip(header, r)) for r in ws.iter_rows(min_row=2, values_only=True)]
+        with repo.db.transaction():
+            return _apply_rows(repo, rows, imported_by, Path(path).name)
+    finally:
+        wb.close()
 
 
 def import_csv(repo: TerminologyRepository, path: Path | str, imported_by: str = "import") -> ImportResult:
     with open(path, newline="", encoding="utf-8-sig") as fh:
-        rows = list(csv.DictReader(fh))
-    return _apply_rows(repo, rows, imported_by, Path(path).name)
+        reader = csv.DictReader(fh)
+        if not reader.fieldnames or 'Canonical' not in reader.fieldnames:
+            raise ValueError('Missing Canonical column. Use a Kaizen terminology export.')
+        rows = list(reader)
+    with repo.db.transaction():
+        return _apply_rows(repo, rows, imported_by, Path(path).name)

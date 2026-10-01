@@ -13,7 +13,7 @@ import { Button, Card, CardHead, Field } from "./ui";
 
 /** "Save as relationship": turns a reviewer's judgement about this pair into an explicit, versioned rule. */
 export function SaveRelationshipPanel({ runId, detail, onCreated }: { runId: string; detail: RowDetail; onCreated: () => void }) {
-  const { name } = useReviewer();
+  const { name, session } = useReviewer();
   const toast = useToast();
   const a = detail.evidence.a;
   const b = detail.evidence.b;
@@ -50,7 +50,7 @@ export function SaveRelationshipPanel({ runId, detail, onCreated }: { runId: str
       .
     </div>
   );
-  if (!a || !b) {
+  if (!a || !b || !session?.is_admin || detail.permission === "view") {
     return existing ? (
       <Card>
         <CardHead title="Terminology" icon={<BookmarkSimple size={18} />} />
@@ -196,8 +196,8 @@ export function ActionItemPanel({ runId, detail, onCreated }: { runId: string; d
           <div className="text-sm text-ink-3">None for this row.</div>
         )}
         <div className="flex flex-wrap gap-2 items-center">
-          <input className="input flex-1 min-w-0 basis-32" placeholder="Owner (optional)" value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner" />
-          <Button loading={busy} disabled={!name || !hasDisc} onClick={create} title={hasDisc ? "" : "This row has no discrepancy to track"}>
+          <input className="input flex-1 min-w-0 basis-32" placeholder="Owner (optional)" value={owner} disabled={detail.permission === "view" || busy} onChange={(e) => setOwner(e.target.value)} aria-label="Owner" />
+          <Button loading={busy} disabled={!name || !hasDisc || detail.permission === "view"} onClick={create} title={detail.permission === "view" ? "View-only access" : hasDisc ? "" : "This row has no discrepancy to track"}>
             Create action item
           </Button>
         </div>

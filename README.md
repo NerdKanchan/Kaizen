@@ -18,7 +18,7 @@ PCOs and label revisions, with the reviewer as the final decision-maker. Built f
 
 ## What it does
 - Reads the documents reviewers already download: JDE BOM prints (PDF) or exports (XLSX/CSV), product labels
-  (PDF, multi-column kit contents, old and new revisions), packaging drawings (vector PDF, EN/ES callouts) and
+  (PDF, multi-column kit contents, old and new revisions), packaging drawings (text or scanned PDF, EN/ES callouts) and
   PCO forms (FM00835 as XLSX/CSV/PDF).
 - Runs the five cross-checks from the brief: BOM ↔ Label, BOM ↔ Drawing, Label ↔ Drawing, PCO ↔ BOM,
   Old ↔ New label, plus coverage (a BOM for every PCO affected code).
@@ -78,7 +78,7 @@ rm -rf kaizen-workspace
 
 ## Tests and evaluation
 ```bash
-.venv/bin/pytest                                   # unit + integration + golden accuracy floors (~1 min)
+.venv/bin/pytest                                   # unit + integration + golden floors; private-data tests when available
 .venv/bin/kaizen eval datasets/golden --out out/e  # precision / recall per check vs ground-truth.json
 .venv/bin/kaizen perf --skus 8 --skus 100          # timing and memory on synthetic datasets
 ```
@@ -114,12 +114,14 @@ Details and the full diagram: `docs/final-architecture.md`. API contract: `docs/
 |---|---|---|
 | BOM | JDE "Bill of Material Print" PDF; XLSX/CSV export | Multi-page, FreeText redline annotations captured, non-physical lines categorised with reasons. |
 | Label | PDF (text); image-only PDF via optional OCR | REF, product name, two/three-column kit contents, wrapped lines, `(3 per)` / `(1 pair)` idioms; `label_old.pdf` = previous revision. |
-| Drawing | Vector PDF | Title block (number, rev, title, plant), EN/ES callouts, conditional callouts, cavity/notes/title-block noise removed. Presence source only. |
+| Drawing | Text PDF; scanned PDF via offline OCR | Multi-sheet title block and EN/ES callouts, conditionality and instructions retained. Repeated callouts compared once with occurrence evidence. Presence source only. |
 | PCO | FM00835 XLSX/CSV/PDF | Affected codes, ADD/DELETE/SUBSTITUTE/MODIFY rows with qty and operation sequence. |
 
 ## Limitations
-See `docs/known-limitations.md`. Headline items: no scanned-BOM OCR, no hand-drawn redlines, case labels not
-parsed, thresholds tuned on synthetic data, one application instance per SQLite workspace, no compliance claim.
+See [known limitations](docs/known-limitations.md) and [real-data validation](docs/real-data-validation.md).
+Diagram OCR reads text; pictured component identity, leader endpoints and placement still need review.
+Real-data matching needs approved terminology and assembly mappings. Hand-drawn redlines and case labels
+are not parsed; thresholds are tuned on synthetic data. No compliance claim.
 
 ## Optional: shared sign-in with Supabase
 The hosted app stores accounts in its central workspace by default. Supabase can optionally check passwords instead. **Only email and password authentication move to Supabase.** Kaizen's account approvals, sessions, decisions, run grants and documents remain in the central workspace. Provider accounts still need Kaizen administrator approval. Sign-in with this provider needs internet access.
@@ -166,16 +168,31 @@ recorded with provider, model, prompt version and timestamp in the run, and neve
 Semantic matching (L4) accepts any local embedding function (`kaizen.matching.semantic.SemanticMatcher`).
 
 ## Optional OCR configuration
-Off by default; image-only label pages are reported and skipped without it. To enable the offline OCR
-fallback for scanned/image-only labels:
+Scanned BOM, label and drawing pages use an installed offline engine automatically. The hosted Docker
+image already includes Tesseract and its English language data. For a portable local installation:
 ```bash
-.venv/bin/pip install rapidocr-onnxruntime
+.venv/bin/pip install -e ".[ocr]"
 ```
-No other configuration is needed — `kaizen.ingest.ocr.ocr_available()` detects the package at runtime and
-`label_pdf` parsing uses it automatically for pages with no extractable text. Results are marked
-`extraction_method="ocr"` with per-word confidence and a warning naming the engine and DPI used. OCR is
-wired for labels only; scanned BOM prints and drawings are still reported as skipped, not read (see
-`docs/known-limitations.md`).
+Alternatively install Tesseract with English language data and place it on `PATH`. Tesseract is preferred
+when both engines are present. OCR runs locally at 240 DPI, preserves raw text, page boxes and confidence,
+and records its engine in the document. RapidOCR supplies line-level confidence and proportionally split
+word boxes; Tesseract supplies individual word boxes. A damaged label REF text layer is re-read from its
+image. Missing engines or unreadable pages produce warnings and block affected comparisons.
+
+## Validate the supplied BD delivery
+
+Keep `trainingdataset/` local (it is ignored by Git), then run:
+
+```bash
+.venv/bin/python scripts/audit_real_data.py trainingdataset --out out/real-bd
+.venv/bin/pytest tests/real tests/unit/test_real_layouts.py
+```
+
+The audit writes `run.json`, `report.xlsx`, `validation.json` and `validation.md`. It independently compares
+the four BOM PDFs with their JDE spreadsheet exports, counts duplicate rows, and reports unresolved
+comparisons. The supplied delivery validates 373 BOM rows, all 140 label quantities and selected callouts
+on every drawing sheet. These extraction checks do not establish real-data matching accuracy or release
+approval. See [the detailed findings and remaining work](docs/real-data-validation.md).
 
 ## Documents
 `docs/solution-overview.md` (plain-language overview for presenting), `docs/system-description.md` (what was built, module by module),

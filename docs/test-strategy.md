@@ -1,7 +1,8 @@
 # Test strategy
 
-Every layer has tests that were written before the code they exercise (test-first), and every bug found
-during development got a regression test. The suite runs offline in about a minute: `.venv/bin/pytest`.
+Every layer has tests, and extraction failures found in the real BD delivery have hermetic regression
+fixtures. Run the offline suite with `.venv/bin/pytest`; private-source/OCR tests run when their prerequisites
+are available and otherwise skip. Runtime depends on the installed OCR engine and local hardware.
 
 ## Layers and what is asserted
 
@@ -28,9 +29,33 @@ annotations), two-column labels, multi-sheet drawings and FM00835 PCO forms, all
 is found, the failing fragment becomes a fixture (see `test_hardening.py`, `test_adversarial.py`).
 
 ## What is deliberately not mocked
-Parsers, matching, checks, storage and the API run for real in tests. Only the OCR engine and the AI client are
-faked (they are optional external components).
+Parsers, matching, checks, storage and the API execute in tests. Hermetic extraction tests mock OCR output
+to exercise failure and geometry handling. `tests/integration/test_offline_ocr.py` also executes an installed engine
+on a scanned JDE fixture; `tests/real/test_bd_delivery.py` runs OCR on the private source labels and drawing; it stays local and is ignored by Git because it holds values transcribed from BD documents.
+
+## Real-data validation
+
+`tests/unit/test_real_layouts.py` covers indented JDE headings, joined OCR starters, original evidence,
+rotated page boxes and marks, encrypted/corrupt input handling, duplicate drawing occurrences, shared
+drawings, inferred identities, low-confidence headers, incomplete extraction blockers, source parity
+and run identity when extraction output changes. These fixtures contain no customer PDF pages.
+
+The optional private suite validates four BOM PDFs against independently parsed JDE exports (all 373 rows,
+including duplicate components, quantities, units, operation sequences and effective dates). Label
+quantities and pack idioms were transcribed from the page images. Drawing assertions are named visual
+probes on every sheet, plus identity, revision, conditionality and presence-only behavior.
+
+```bash
+.venv/bin/python scripts/audit_real_data.py trainingdataset --out out/real-bd
+.venv/bin/pytest tests/real tests/unit/test_real_layouts.py
+```
+
+The audit forces the offline provider, retains all source copies, avoids duplicate comparisons and writes
+a reviewable workbook, JSON run and extraction report. Source files and generated output are ignored by
+Git. See [real-data validation](real-data-validation.md) for the distinction between extraction evidence
+and matching accuracy.
 
 ## Known gaps
-Real JDE / MasterControl files are not in the suite yet (none available); `tests/fixtures/real/` is reserved for
-them and the golden floors will be re-tuned when they arrive.
+Real pairing/discrepancy accuracy cannot be measured without independently reviewed ground truth. The
+encrypted relationship workbook remains unavailable, and there are no real PCO, revision-pair or case-label
+fixtures in this delivery. Golden accuracy floors remain unchanged; they are not a real-data acceptance gate.

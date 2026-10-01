@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from kaizen.models import SubQuantity
 
@@ -27,8 +27,9 @@ def parse_decimal(text: str | None) -> Decimal | None:
     if not cleaned:
         return None
     try:
-        return Decimal(cleaned)
-    except Exception:
+        value = Decimal(cleaned)
+        return value if value.is_finite() else None
+    except InvalidOperation:
         return None
 _SUB_KINDS = {"PER": "per", "PAIR": "pair", "PAIRS": "pair", "PACK": "pack", "PK": "pack", "EACH": "each", "EA": "each"}
 _SUB_PAREN_RE = re.compile(r"\(\s*(?P<n>\d+)\s*(?P<kind>per|pairs?|pack|pk|each|ea)(?:\s+[a-z]+)?\s*\)", re.IGNORECASE)
@@ -48,6 +49,8 @@ def _extract_sub_quantity(desc: str) -> tuple[str, SubQuantity | None]:
     for rx in (_SUB_PAREN_RE, _SUB_TRAIL_RE):
         m = rx.search(desc)
         if m:
+            if int(m.group('n')) < 1:
+                return desc, None
             sub = SubQuantity(value=int(m.group("n")), kind=_SUB_KINDS[m.group("kind").upper()], raw=m.group(0).strip())
             cleaned = (desc[: m.start()] + desc[m.end():]).strip().rstrip(",").strip()
             return cleaned, sub

@@ -18,6 +18,7 @@ class Word:
     line: int
     word_no: int
     confidence: float = 1.0
+    source_text: str | None = None
 
     @property
     def cx(self) -> float:
@@ -65,6 +66,14 @@ def extract_words(page: pymupdf.Page, exclude_annotation_text: bool = True) -> l
     if exclude_annotation_text:
         rects = [a.rect for a in page.annots()]
         words = [w for w in words if not any(r.x0 <= w.cx <= r.x1 and r.y0 <= w.cy <= r.y1 for r in rects)]
+    if page.rotation:
+        # Parsers and browser overlays use the displayed orientation. PDF annotation
+        # APIs use unrotated coordinates, so writers convert back at that boundary.
+        rotated = []
+        for w in words:
+            r = pymupdf.Rect(w.x0, w.y0, w.x1, w.y1) * page.rotation_matrix
+            rotated.append(Word(text=w.text, x0=r.x0, y0=r.y0, x1=r.x1, y1=r.y1, block=w.block, line=w.line, word_no=w.word_no, confidence=w.confidence))
+        words = rotated
     return sorted(words, key=lambda w: (round(w.y0, 1), w.x0))
 
 
@@ -98,7 +107,7 @@ def assign_columns(line: list[Word], bands: list[ColumnBand]) -> dict[str, list[
 def extract_annotations(page: pymupdf.Page) -> list[Annotation]:
     out: list[Annotation] = []
     for a in page.annots():
-        r = a.rect
+        r = a.rect * page.rotation_matrix
         out.append(
             Annotation(
                 type=a.type[1] if isinstance(a.type, tuple) else str(a.type),

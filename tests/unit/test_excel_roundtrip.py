@@ -5,6 +5,8 @@ values are validated; a decision the database changed after the export is a conf
 overwrite; a dry run reports everything and writes nothing; every applied decision is audited.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import openpyxl
 import pytest
 
@@ -76,9 +78,11 @@ def test_dry_run_reports_what_would_change_and_writes_nothing(env, tmp_path):
     path = _export(ws, run, tmp_path / "r.xlsx")
     r1, r2 = _mismatch_rows(run, 2)
     _edit(path, {r1: {"Reviewer Decision": "CONFIRM_DISCREPANCY", "Reviewer Comment": "qty wrong"}, r2: {"Reviewer Decision": "ACCEPT"}})
+    audit_before = ws.db.conn.execute('SELECT COUNT(*) FROM audit').fetchone()[0]
     res = import_decisions(ws, run, path, slot=1, reviewer="Dharma", dry_run=True)
     assert res.dry_run and sorted(res.applied) == sorted([r1, r2]) and res.conflicts == [] and res.invalid == []
     assert ReviewStore(ws.db).all_decisions(run.metadata.run_id) == {}
+    assert ws.db.conn.execute('SELECT COUNT(*) FROM audit').fetchone()[0] == audit_before
     assert "dry run" in res.summary().lower()
 
 
@@ -192,3 +196,46 @@ def test_a_finalized_row_is_not_reopened_by_an_import(env, tmp_path):
     assert res.applied == [] and [i["row_id"] for i in res.invalid] == [r1]
     assert "finalized" in res.invalid[0]["reason"].lower()
     assert review.decisions(run.metadata.run_id, r1)[1].decision == "CONFIRM_DISCREPANCY"
+
+
+def test_decision_changed_in_the_same_second_as_export_is_a_conflict(env, tmp_path, monkeypatch):
+    import kaizen.reporting.excel as reporting
+    import kaizen.review.store as reviews
+    frozen = datetime(2026, 10, 1, 12, 0, 0, 100000, tzinfo=timezone.utc)
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+    ws, run = env
+    monkeypatch.setattr(reporting, 'datetime', Clock)
+    monkeypatch.setattr(reviews, 'datetime', Clock)
+    row = _mismatch_rows(run, 1)[0]
+    path = _export(ws, run, tmp_path / 'same-second.xlsx')
+    frozen += timedelta(microseconds=100000)
+    ReviewStore(ws.db).decide(run.metadata.run_id, row, 1, 'Dharma', 'ACCEPT')
+    _edit(path, {row: {'Reviewer Decision': 'CONFIRM_DISCREPANCY'}})
+    result = import_decisions(ws, run, path, 1, 'Dharma')
+    assert not result.applied and len(result.conflicts) == 1
+
+
+def test_failed_excel_import_rolls_back_earlier_rows(env, tmp_path, monkeypatch):
+    ws, run = env
+    path = _export(ws, run, tmp_path / 'failure.xlsx')
+    rows = _mismatch_rows(run, 2)
+    _edit(path, {row: {'Reviewer Decision': 'ACCEPT'} for row in rows})
+    review = ReviewStore(ws.db)
+    original = review.decide
+    count = 0
+    def fail_later(*args, **kwargs):
+        nonlocal count
+        count += 1
+        result = original(*args, **kwargs)
+        if count == 2:
+            raise RuntimeError('injected second-row failure')
+        return result
+    monkeypatch.setattr(review, 'decide', fail_later)
+    audit_before = ws.db.conn.execute('SELECT COUNT(*) FROM audit').fetchone()[0]
+    with pytest.raises(RuntimeError, match='second-row failure'):
+        import_decisions(ws, run, path, 1, 'Dharma', review_store=review)
+    assert not review.all_decisions(run.metadata.run_id)
+    assert ws.db.conn.execute('SELECT COUNT(*) FROM audit').fetchone()[0] == audit_before

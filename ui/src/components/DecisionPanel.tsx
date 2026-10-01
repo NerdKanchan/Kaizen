@@ -47,6 +47,7 @@ export function DecisionPanel({runId, rowId, detail, onChanged}: {runId: string;
           <Field label="Comment"><textarea className="input w-full" rows={3} value={comment} onChange={e => setComment(e.target.value)} /></Field>
           {canEdit && <Button variant="primary" disabled={!changed} loading={busy} onClick={saveDecision}>Save decision</Button>}
         </fieldset>
+        <p className="text-xs text-ink-3">Accept keeps the engine recommendation. To clear a flagged mismatch as a valid match, save an Exact or Equivalent override and approve it.</p>
         {detail.final && <p className="text-xs text-ink-3">Saving another change clears this approval and keeps it in the history.</p>}
         {current && <p className="text-xs text-ink-3">Last changed by {current.reviewer} · {fmtDate(current.decided_at)}</p>}
         <div className="text-sm">Effective classification: <ClassificationBadge value={detail.effective_classification} /></div>

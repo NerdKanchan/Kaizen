@@ -60,3 +60,26 @@ Before publishing this revision with its required collaboration API dependencies
 
 These checks exercise current backend source in isolated test workspaces. They do
 not change the previously running local preview process or its response shape.
+
+## Browser-comment navigation revision
+
+- Production build and all 19 UI tests passed after the final changes.
+- Expanded a second run and opened its Documents page; its route and document
+  list matched that run. The selected run reveals its own destinations.
+- Workspace collapsed and reopened with Enter while on the review queue.
+  Desktop sidebar collapse retained the selected run shortcuts and Profile.
+- Profile opened from the account avatar, displayed the existing session, and
+  changed the theme. The profile control and top-bar icon updated together.
+- Needs review opened the correct run’s queue with Flagged only selected and
+  226 comparisons. The heading action points to the same filter.
+- Profile and overview inspected at 320, 375, 414 and 768px; root width matched
+  viewport width. Profile controls fit, and both metric links stayed on one line.
+  Account details stack their labels above values on the smallest screens.
+- Mobile navigation opened with its run tree and closed with Escape. Profile
+  remains reachable from the top-bar avatar on mobile.
+- Desktop overview inspected at the user’s 1146 × 772 screenshot size. Preview
+  screenshots are in `output/ui-review/navigation-overview.jpg` and
+  `output/ui-review/profile-dark.jpg`. Temporary viewport overrides were reset.
+
+This verification used existing runs and the current session. Account details
+are read-only; the profile provides appearance, run navigation and sign out.

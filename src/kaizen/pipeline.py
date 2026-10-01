@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from kaizen.ingest.bom_categorize import CATEGORIZER_VERSION
 from kaizen.ingest.detect import parse_document
 from kaizen.ingest.grouping import group_by_sku, identity_key
 from kaizen.ingest.hashing import sha256_file
+from kaizen.ingest.ocr import available_engines
 from kaizen.matching.ladder import MatchLadder
 from kaizen.matching.normalize import NORMALIZER_VERSION
 from kaizen.models import AuditEvent, CoverageFinding, DiscrepancyType, DocType, InputFile, Run, RunMetadata, Thresholds
@@ -41,16 +44,16 @@ CAPABILITIES = {
     "Match ladder L1 exact / L2 relationship / L3 fuzzy": "IMPLEMENTED",
     "Redlines: PDF FreeText annotations": "IMPLEMENTED (captured into row attributes and used by the PCO ↔ BOM check)",
     "Redlines: hand-drawn or scanned": "NOT IMPLEMENTED",
-    "OCR for scanned / image-only BOM and drawing pages": "NOT IMPLEMENTED",
+    "OCR for scanned / image-only BOM and drawing pages": "IMPLEMENTED with offline Tesseract or RapidOCR; unreadable pages block comparison",
     "PCO parsing (FM00835 form, XLSX/CSV/PDF)": "IMPLEMENTED",
     "Check: PCO ↔ BOM (ADD / DELETE / SUBSTITUTE / MODIFY, redline-aware)": "IMPLEMENTED",
     "Coverage: BOM present for every PCO affected code": "IMPLEMENTED",
-    "Packaging drawing parsing (vector PDF; EN/ES callouts, conditional callouts, title block)": "IMPLEMENTED",
+    "Packaging drawing parsing (vector/scanned PDF; multi-sheet EN/ES callouts, instructions, title block)": "IMPLEMENTED (presence only; photographic layout and leader lines require review)",
     "Checks: BOM ↔ Drawing, Label ↔ Drawing (presence/identity, drawing rev)": "IMPLEMENTED",
     "Check: Old ↔ New label (semantic change report, PCO-derived expected changes)": "IMPLEMENTED",
     "Label revision roles by filename token (old/prev vs new/current)": "IMPLEMENTED",
     "Semantic (embedding) matching L4": "IMPLEMENTED as an opt-in rung (needs a local embedding model; can only yield POTENTIAL)",
-    "OCR for image-only label pages": "IMPLEMENTED when rapidocr-onnxruntime is installed; otherwise reported as NOT AVAILABLE",
+    "OCR for image-only label pages": "IMPLEMENTED with offline Tesseract or RapidOCR; damaged REF text layers re-read from image",
     "Reviewer workflow: two reviewers, server-side blind mode, decisions, action items, mining, Excel round-trip": "IMPLEMENTED",
     "Reviewer UI (local React app served by `kaizen serve`)": "IMPLEMENTED",
 }
@@ -95,8 +98,14 @@ def ingest_folder(root: Path | str) -> Ingested:
     ing = Ingested(root=root, audit=[AuditEvent(action="run.started", detail=f"input root {root}")])
     inputs, documents, warnings, audit = ing.inputs, ing.documents, ing.warnings, ing.audit
     for f in discover_files(root):
-        outcome = parse_document(f)
         rel = _rel(f, root)
+        try:
+            outcome = parse_document(f)
+        except Exception as exc:
+            inputs.append(InputFile(path=rel, sha256=sha256_file(f), size_bytes=f.stat().st_size))
+            warnings.append(f"{rel}: parsing failed ({type(exc).__name__}); file not compared")
+            audit.append(AuditEvent(action="document.failed", detail=warnings[-1]))
+            continue
         inputs.append(InputFile(path=rel, sha256=sha256_file(f), size_bytes=f.stat().st_size, doc_type=outcome.doc_type.value if outcome.doc_type else None))
         if outcome.document is not None:
             if outcome.document.doc_type is DocType.LABEL:
@@ -174,7 +183,7 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
     coverage: list[CoverageFinding] = []
     for g in groups:
         has_bom = any(docs_by_id[i].doc_type is DocType.BOM for i in g.document_ids)
-        has_label = any(docs_by_id[i].doc_type is DocType.LABEL for i in g.document_ids)
+        has_label = any(docs_by_id[i].doc_type is DocType.LABEL and docs_by_id[i].header.get("revision_role") != "old" for i in g.document_ids)
         has_drawing = any(docs_by_id[i].doc_type is DocType.DRAWING for i in g.document_ids)
         status = "OK" if has_bom and has_label else ("MISSING_BOM" if not has_bom else "MISSING_LABEL")
         coverage.append(CoverageFinding(kind="sku_set", sku=g.sku, status=status, detail=f"BOM {'present' if has_bom else 'MISSING'}, label {'present' if has_label else 'MISSING'}, drawing {'present' if has_drawing else 'absent (drawing checks skipped)'}", source=", ".join(_rel(Path(docs_by_id[i].path), root) for i in g.document_ids)))
@@ -193,6 +202,9 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
         audit.append(AuditEvent(action="check.completed", detail=f"PCO_BOM {number}: {len(res)} rows against {len(boms)} BOM(s)"))
     snap = store.snapshot()
     parser_versions = {
+        "ocr": "2",
+        "pdf_geometry": "2",
+        "grouping": "2",
         "bom_pdf": bom_pdf.PARSER_VERSION,
         "bom_table": bom_table.PARSER_VERSION,
         "label_pdf": label_pdf.PARSER_VERSION,
@@ -206,7 +218,9 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
         "check_label_drawing": LABEL_DRAWING_VERSION,
         "check_label_revision": LABEL_REVISION_VERSION,
     }
-    seed = json.dumps({"inputs": sorted(i.sha256 for i in inputs), "terminology": snap.version, "thresholds": thresholds.model_dump(), "tool": __version__, "parsers": parser_versions}, sort_keys=True)
+    extracted = [{"sha256": d.sha256, "type": d.doc_type.value, "sku": d.sku, "header": d.header, "items": [{"description": i.description, "item_number": i.item_number, "quantity": str(i.quantity), "uom": i.uom, "confidence": i.extraction_confidence, "attributes": i.attributes, "page": i.evidence.page, "bbox": i.evidence.bbox.model_dump() if i.evidence.bbox else None, "method": i.evidence.extraction_method, "raw": i.evidence.raw_text} for i in d.items]} for d in documents]
+    extraction_signature = hashlib.sha256(json.dumps(extracted, sort_keys=True, default=str).encode()).hexdigest()
+    seed = json.dumps({"inputs": sorted((i.path, i.sha256) for i in inputs), "extraction": extraction_signature, "terminology": snap.version, "thresholds": thresholds.model_dump(), "tool": __version__, "parsers": parser_versions}, sort_keys=True)
     run_id = "run-" + hashlib.sha256(seed.encode()).hexdigest()[:12]
     metadata = RunMetadata(
         run_id=run_id,
@@ -217,8 +231,9 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
         terminology_count=snap.count,
         input_root=str(root),
         inputs=inputs,
-        capabilities={**CAPABILITIES, "Optional AI adjudication (L5)": ("DISABLED (NullProvider; no external calls)" if isinstance(provider, NullProvider) else f"ENABLED ({provider.describe().get('provider')} / {provider.describe().get('model')}) — suggestions only, never authoritative")},
+        capabilities={**CAPABILITIES, "Offline OCR engines available": ", ".join(available_engines()) or "NONE — install Tesseract or kaizen-crosscheck[ocr]", "Optional AI adjudication (L5)": ("DISABLED (NullProvider; no external calls)" if isinstance(provider, NullProvider) else f"ENABLED ({provider.describe().get('provider')} / {provider.describe().get('model')}) — suggestions only, never authoritative")},
         ai_provider=provider.describe(),
+        extraction_signature=extraction_signature,
     )
     usage: dict[str, int] = {}
     for r in results:
@@ -244,7 +259,16 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
 def save_run(run: Run, path: Path | str) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(run.model_dump_json(indent=2), encoding="utf-8")
+    payload = run.model_dump_json(indent=2)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as output:
+            temporary = Path(output.name)
+            output.write(payload)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return path
 
 

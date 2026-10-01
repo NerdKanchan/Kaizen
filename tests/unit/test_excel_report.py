@@ -67,6 +67,7 @@ def test_metadata_sheet_answers_where_did_this_come_from(run, tmp_path):
     for f in run.metadata.inputs:
         assert f.sha256 in text
     assert run.metadata.terminology_version in text
+    assert run.metadata.extraction_signature in text and "Extraction signature (SHA-256)" in text
     assert "potential" in text and "0.85" in text
     assert "NOT IMPLEMENTED" in text
     rel_text = " ".join(str(c.value) for row in wb["Relationships_Used"].iter_rows() for c in row if c.value is not None)

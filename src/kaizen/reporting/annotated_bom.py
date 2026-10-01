@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pymupdf
 
+from kaizen.ingest.pdf_words import extract_words
 from kaizen.models import Document, Run, Severity
 
 CHECK_COLORS = {"BOM_LABEL": (0.05, 0.35, 0.9), "BOM_DRAWING": (0.55, 0.1, 0.75), "PCO_BOM": (0.95, 0.5, 0.05)}
@@ -64,14 +65,16 @@ def _bom_rows(run: Run, bom: Document):
 def _draw_mark(page: pymupdf.Page, kind: str, x: float, y: float, color) -> None:
     shape = page.new_shape()
     s = MARK
+    def point(px, py):
+        return pymupdf.Point(px, py) * page.derotation_matrix
     if kind == "clear":
-        shape.draw_line((x, y), (x + s * 0.4, y + s * 0.5))
-        shape.draw_line((x + s * 0.4, y + s * 0.5), (x + s, y - s * 0.5))
+        shape.draw_line(point(x, y), point(x + s * 0.4, y + s * 0.5))
+        shape.draw_line(point(x + s * 0.4, y + s * 0.5), point(x + s, y - s * 0.5))
     elif kind == "discrepancy":
-        shape.draw_line((x, y - s * 0.5), (x + s, y + s * 0.5))
-        shape.draw_line((x, y + s * 0.5), (x + s, y - s * 0.5))
+        shape.draw_line(point(x, y - s * 0.5), point(x + s, y + s * 0.5))
+        shape.draw_line(point(x, y + s * 0.5), point(x + s, y - s * 0.5))
     else:
-        shape.draw_circle((x + s / 2, y), s * 0.45)
+        shape.draw_circle(point(x + s / 2, y), s * 0.45)
     shape.finish(color=color, width=1.1)
     shape.commit()
 
@@ -92,8 +95,8 @@ def write_annotated_bom(run: Run, bom: Document, out_path: Path | str, checked_b
             continue
         page = doc[ev.page - 1]
         if ev.page not in margin_x:
-            words = page.get_text("words")
-            max_x1 = max((w[2] for w in words), default=page.rect.width - 40)
+            words = extract_words(page)
+            max_x1 = max((w.x1 for w in words), default=page.rect.width - 40)
             base = max_x1 + 4
             if base + 3 * 9 + MARK > page.rect.width - 2:
                 base = page.rect.width - 2 - 3 * 9 - MARK  # squeeze into whatever margin remains
@@ -118,7 +121,7 @@ def _stamp(page: pymupdf.Page, run: Run, bom: Document, checked_by: list[str] | 
         w.append((x + 12, 26), f"{label}  (v clear, x discrepancy, o needs review)", font=_FONT, fontsize=5.5)
         _draw_mark(page, "clear", x, 24, CHECK_COLORS[check])
         x += 150
-    w.write_text(page, color=(0.8, 0.1, 0.1))
+    w.write_text(page, color=(0.8, 0.1, 0.1), matrix=page.derotation_matrix)
 
 
 def _fallback_page(run: Run, bom: Document, rows, out_path: Path, checked_by, review_states) -> AnnotatedOutcome:

@@ -1,15 +1,17 @@
-// App shell: a BD-navy navigation rail, a top bar with the run switcher, the theme toggle and the
-// reviewer's identity, and the page. Routes and behaviour are unchanged from the first build.
-import { CaretLeft, CaretRight, ChartBar, ClipboardText, Files, Folders, GitDiff, Lightbulb, ListChecks, List, X, ArrowRight, SignOut, SquaresFour, TextAa } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight, ChartBar, ClipboardText, Files, Folder, Folders, GitDiff, Lightbulb, ListChecks, List, X, ArrowRight, SignOut, SquaresFour, TextAa, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, matchPath, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { displayName, enc } from "../lib/format";
 import { useReviewer } from "../lib/reviewer";
 import { useAsync } from "../lib/useAsync";
+import { backendProblem } from "../lib/backend";
+import { useDataRefresh } from "../lib/dataRefresh";
+import { ErrorBox } from "./Feedback";
 import { ScrollMemory } from "./ScrollMemory";
 import { SignIn } from "./SignIn";
 import { ThemeToggle } from "./ThemeToggle";
+import { SidebarSection } from "./SidebarSection";
 import { Button } from "./ui";
 
 const LAST_RUN_KEY = "kaizen.lastRun";
@@ -29,6 +31,7 @@ const SECTIONS: [RegExp, string][] = [
   [/^\/terminology$/, "Terminology"],
   [/^\/action-items$/, "Action items"],
   [/^\/admin$/, "Manage users"],
+  [/^\/profile$/, "Profile"],
   [/^\/$/, "All runs"],
 ];
 
@@ -68,7 +71,8 @@ export function Layout() {
   const sidebar = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!mobileOpen) return;
-    sidebar.current?.querySelector<HTMLAnchorElement>('a.nav-item')?.focus();
+    const first = [...(sidebar.current?.querySelectorAll<HTMLElement>('button, a[href]') ?? [])].find(element => element.getClientRects().length > 0);
+    first?.focus();
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -85,7 +89,15 @@ export function Layout() {
     document.title = [section, routeRun, "Kaizen Cross-Check"].filter(Boolean).join(" · ");
   }, [loc.pathname, routeRun]);
   const { session, loading, signOut } = useReviewer();
-  const runs = useAsync(() => session ? api.listRuns() : Promise.resolve([]), [routeRun, session?.reviewer]);
+  const health = useAsync(api.health, []);
+  useEffect(() => {
+    const refresh = () => health.reload();
+    window.addEventListener("focus", refresh);
+    const timer = window.setInterval(refresh, 30000);
+    return () => { window.removeEventListener("focus", refresh); window.clearInterval(timer); };
+  }, [health.reload]);
+  const runs = useAsync(() => session ? api.listRuns() : Promise.resolve([]), [loc.pathname, session?.reviewer]);
+  useDataRefresh(runs.reload);
   // The rail collapses two ways: by hand (remembered per browser) and, below lg, because there is
   // no room. Collapsing by hand only removes the wide state; the narrow one is the same either way.
   const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
@@ -106,12 +118,17 @@ export function Layout() {
       return next;
     });
 
-  if (loading) return <div className="p-6 text-sm text-ink-3">Loading…</div>;
+  if (health.error) return <div className="p-6"><ErrorBox error={health.error} onRetry={health.reload} /></div>;
+  const problem = health.data && backendProblem(health.data);
+  if (problem) return <div className="p-6"><ErrorBox error={problem} onRetry={() => window.location.reload()} /></div>;
+  if (loading || !health.data) return <div className="p-6 text-sm text-ink-3">Loading…</div>;
   if (!session) return <SignIn />;
 
   const currentRun = runs.data?.find(x => x.run_id === runId);
   const section = SECTIONS.find(([re]) => re.test(loc.pathname))?.[1] ?? "Workspace";
   const r = (suffix: string) => runId ? `/runs/${enc(runId)}${suffix}` : null;
+  const disclosureKey = (key: string) => `kaizen.navigation.${session.reviewer}.${key}`;
+  const accessibleRuns = runs.data ?? (routeRun ? [{ run_id: routeRun, name: routeRun }] : []);
   const item = (to: string | null, label: string, icon: ReactNode, end = false) => to ? (
     <NavLink to={to} end={end} title={label} className={({ isActive }) => `nav-item ${isActive ? "is-active" : ""}`}>
       {icon}<span className="nav-label">{label}</span>
@@ -131,24 +148,51 @@ export function Layout() {
           <button type="button" onClick={toggleRail} className="sidebar-collapse" aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}>{railCollapsed ? <CaretRight size={16} /> : <CaretLeft size={16} />}</button>
         </div>
         <nav aria-label="Main navigation" className="sidebar-links">
-          <div className="nav-section-label nav-label">Workspace</div>
+          <div className="nav-tree">
+          <SidebarSection label="Workspace" storageKey={disclosureKey("workspace")} activePath={["/", "/action-items", "/terminology"].includes(loc.pathname) ? loc.pathname : undefined}>
           {item("/", "All runs", <Folders size={20} />, true)}
           {item("/action-items", "Action items", <ClipboardText size={20} />)}
           {item("/terminology", "Terminology", <TextAa size={20} />)}
-          {runId ? <>
-            <div className="nav-section-label nav-label">{routeRun ? "Current run" : "Recent run"}</div>
-            <Link className="sidebar-run nav-label" to={r("")!} title={currentRun?.name || runId}>{currentRun?.name || runId}</Link>
+          </SidebarSection>
+          <SidebarSection label="Runs" storageKey={disclosureKey("runs")} activePath={routeRun ? loc.pathname : undefined}>
+            {runs.error && <div className="sidebar-hint">Couldn’t load runs. <button onClick={runs.reload}>Retry</button></div>}
+            {runs.loading && !accessibleRuns.length && <p className="sidebar-hint">Loading runs…</p>}
+            {!runs.loading && !runs.error && runs.data?.length === 0 && <p className="sidebar-hint">Your runs will appear here.</p>}
+            {accessibleRuns.map(run => {
+              const base = `/runs/${enc(run.run_id)}`;
+              const active = routeRun === run.run_id ? loc.pathname : undefined;
+              return <SidebarSection key={run.run_id} label={run.name || run.run_id} icon={<Folder size={18} />} className={`sidebar-run-group ${active ? "contains-active" : ""}`} storageKey={disclosureKey(`run.${run.run_id}`)} activePath={active} defaultOpen={false}>
+                <div className="sidebar-run-pages">
+                  {item(base, "Overview", <SquaresFour size={18} />, true)}
+                  {item(`${base}/review`, "Review queue", <ListChecks size={18} />)}
+                  {item(`${base}/documents`, "Documents", <Files size={18} />)}
+                  <SidebarSection label="Analysis" className="sidebar-analysis" storageKey={disclosureKey(`analysis.${run.run_id}`)} activePath={active && /\/(mining|diff|business)$/.test(active) ? active : undefined} defaultOpen={false}>
+                    {item(`${base}/mining`, "Suggested matches", <Lightbulb size={18} />)}
+                    {item(`${base}/diff`, "Compare runs", <GitDiff size={18} />)}
+                    {item(`${base}/business`, "Business case", <ChartBar size={18} />)}
+                  </SidebarSection>
+                </div>
+              </SidebarSection>;
+            })}
+          </SidebarSection>
+          {session.is_admin && <SidebarSection label="Administration" storageKey={disclosureKey("admin")} activePath={loc.pathname === "/admin" ? loc.pathname : undefined}>{item("/admin", "Manage users", <ClipboardText size={20} />)}</SidebarSection>}
+          </div>
+          <div className="nav-compact">
+            {item("/", "All runs", <Folders size={20} />, true)}
+            {item("/action-items", "Action items", <ClipboardText size={20} />)}
+            {item("/terminology", "Terminology", <TextAa size={20} />)}
+            {runId && <div className="compact-run-links">
             {item(r(""), "Overview", <SquaresFour size={20} />, true)}
             {item(r("/review"), "Review queue", <ListChecks size={20} />)}
             {item(r("/documents"), "Documents", <Files size={20} />)}
-            <div className="nav-section-label nav-label">Analysis</div>
             {item(r("/mining"), "Suggested matches", <Lightbulb size={20} />)}
             {item(r("/diff"), "Compare runs", <GitDiff size={20} />)}
             {item(r("/business"), "Business case", <ChartBar size={20} />)}
-          </> : <p className="sidebar-hint nav-label">Open a run to review results and explore its documents.</p>}
-          {session.is_admin && <><div className="nav-section-label nav-label">Administration</div>{item("/admin", "Manage users", <ClipboardText size={20} />)}</>}
+            </div>}
+            {session.is_admin && item("/admin", "Manage users", <ClipboardText size={20} />)}
+          </div>
         </nav>
-        <div className="sidebar-footer nav-label"><img src="/bd-logo.png" alt="BD" /><span>Kaizen Cross-Check</span></div>
+        <div className="sidebar-footer">{item("/profile", "Profile", <UserCircle size={20} />)}</div>
       </aside>
       <div className="app-body">
         <header className="app-topbar">
@@ -156,14 +200,14 @@ export function Layout() {
           <nav aria-label="Breadcrumb" className="breadcrumbs"><Link to="/">Workspace</Link><CaretRight size={14} /><span aria-current="page">{section}</span></nav>
           <div className="topbar-account">
             <ThemeToggle />
-            <span className="account-avatar" title={session.reviewer}>{initials(displayName(session.reviewer))}</span>
+            <Link to="/profile" className="account-avatar" aria-label="Open your profile" title="Your profile">{initials(displayName(session.reviewer))}</Link>
             <span className="account-name">{displayName(session.reviewer)}<small>{session.is_admin ? "Administrator" : "Reviewer"}</small></span>
             {session.blind && <span className="chip bg-brand-100 text-brand-700 border-brand-200">Blind</span>}
             <Button variant="ghost" size="sm" iconOnly aria-label="Sign out" onClick={() => void signOut()} icon={<SignOut size={18} />} />
           </div>
         </header>
         {routeRun && <div className="run-context">
-          <label htmlFor="current-run">Current run</label>
+          <label htmlFor="current-run">Run</label>
           <select id="current-run" className="input input-sm" value={runId ?? ""} onChange={e => e.target.value && nav(`/runs/${enc(e.target.value)}`)}>
             {(runs.data ?? []).map(x => <option key={x.run_id} value={x.run_id}>{x.name || x.run_id}</option>)}
             {!currentRun && <option value={runId ?? ""}>{runId}</option>}

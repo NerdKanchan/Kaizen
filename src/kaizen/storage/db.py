@@ -2,6 +2,7 @@
 
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = """
@@ -182,6 +183,28 @@ class LockedConnection:
     def __init__(self, conn: sqlite3.Connection, lock: threading.RLock):
         self._conn = conn
         self._lock = lock
+        self._transaction_depth = 0
+
+    @contextmanager
+    def transaction(self):
+        """Hold the connection through a whole operation; nested operations use savepoints.
+
+        Store methods may call commit themselves. Inside this boundary those commits are deferred,
+        so a failed copy or registration cannot leave half its rows behind.
+        """
+        with self._lock:
+            name = f"kaizen_tx_{self._transaction_depth}"
+            self._conn.execute(f"SAVEPOINT {name}")
+            self._transaction_depth += 1
+            try:
+                yield
+                self._conn.execute(f"RELEASE SAVEPOINT {name}")
+            except BaseException:
+                self._conn.execute(f"ROLLBACK TO SAVEPOINT {name}")
+                self._conn.execute(f"RELEASE SAVEPOINT {name}")
+                raise
+            finally:
+                self._transaction_depth -= 1
 
     def execute(self, sql: str, params=()) -> _Rows:
         with self._lock:
@@ -200,7 +223,8 @@ class LockedConnection:
 
     def commit(self) -> None:
         with self._lock:
-            self._conn.commit()
+            if not self._transaction_depth:
+                self._conn.commit()
 
     def rollback(self) -> None:
         with self._lock:
@@ -252,6 +276,9 @@ class Database:
         from datetime import datetime, timezone
 
         self.conn.execute("INSERT INTO audit (at, actor, action, detail) VALUES (?,?,?,?)", (datetime.now(timezone.utc).isoformat(), actor, action, detail))
+
+    def transaction(self):
+        return self.conn.transaction()
 
     def close(self) -> None:
         self.conn.close()

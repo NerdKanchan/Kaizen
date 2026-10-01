@@ -1,10 +1,14 @@
 # Kaizen Cross-Check — local API contract (for the reviewer UI)
 
 Base URL when running `kaizen serve`: `http://127.0.0.1:8765`. All endpoints are local. JSON unless stated.
-Errors: 400 (invalid input), 401 (no review session, or bad credentials), 403 (refused for a blind
-reviewer, or a Supabase account stuck waiting for email confirmation), 404 (unknown id), 409 (account
-exists), 429 (locked out after repeated failures, or Supabase rate limits), 503 (Supabase unreachable or
-misconfigured).
+Errors: 400 (invalid input), 401 (no approved review session, or bad credentials), 403 (insufficient
+permission), 404 (unknown or inaccessible id), 409 (account exists or stale review revision),
+422 (malformed request), 429 (rate limited), 500 (unexpected error, with a server-log reference),
+503 (account provider unavailable).
+
+The current HTTP interface uses one shared decision per row and explicit approval. The legacy
+two-reviewer CLI store is separate. `/api/health` reports `api_contract: 3` and `restart_required`;
+the UI requires a matching contract and a server running the current source.
 
 ## Signing in (email and password)
 A session can only be opened by someone holding an account on an allowed email address. Reviewers sign
@@ -17,8 +21,8 @@ themselves up. Accounts live in one of two places (see `kaizen auth show`):
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/auth/signup` | `{email, password}` | `{ok: true, email}` |
-| POST | `/api/auth/signin` | `{email, password, slot:1\|2, blind?}` | `{reviewer, slot, blind, created_at, blind_review_policy}` + `Set-Cookie` |
+| POST | `/api/auth/signup` | `{email, password}` | Account registration with `status: "pending"`; administrator approval is required. |
+| POST | `/api/auth/signin` | `{email, password}` | `{reviewer, slot:1, blind:false, is_admin, created_at, blind_review_policy}` + `Set-Cookie` |
 
 If the Supabase project still has "Confirm email" on, sign-up is **503** with an explanation (the
 confirmation email would never arrive), and an account created that way signs in with **403** until an
@@ -65,40 +69,45 @@ returned in an HttpOnly cookie (`kaizen_session`), so page scripts cannot read o
 | GET | `/api/sessions/current` | | `{session: {...}\|null, blind_review_policy, accounts: "local"\|"supabase"}` |
 | DELETE | `/api/sessions/current` | | `{ended: bool}` and clears the cookie |
 
-`blind` is decided by the server: reviewer 1 is never blind; reviewer 2 is always blind while the
-workspace policy is `required` (the default) and may pass `blind:false` only when it is `optional`. The
-policy is changed from the command line (`kaizen review policy --set required|optional`), never over HTTP.
-
-While the policy is `required`, these endpoints return **401** without a session: run summary, results,
-row detail, decisions, finalize, bulk-accept, action items, relationships from a row, mining approve and
-reject, terminology writes, export, annotated BOM and audit. Run creation and health do not need one.
-
-A **blind** session is refused (**403**) on `export.xlsx`, `annotated-bom` and `/api/audit`, because all
-three would reveal reviewer 1's decisions. It is also refused on `finalize` for a row it cannot see.
+HTTP sessions use `slot: 1` and `blind: false`; changes and approvals are shared with collaborators
+who have access to the run. Accounts require administrator approval. Run creation and every run-data
+endpoint require an approved session. Health is public. Owners can share a run with edit or view
+access; viewers cannot mutate or download review exports. Inaccessible run IDs return 404.
 
 ## Runs
 | Method | Path | Body / params | Returns |
 |---|---|---|---|
-| GET | `/api/health` | | `{status, version, workspace}` |
-| GET | `/api/runs` | | `[{run_id, created_at, input_root, tool_version, terminology_version, json_path, summary:{rows, skus, documents, needs_validation, EXACT, EQUIVALENT, POTENTIAL, MISMATCH, MISSING}}]` (flat classification keys; counts over all rows as registered) |
+| GET | `/api/health` | | `{status, version, api_contract, restart_required, hosted}` |
+| GET | `/api/runs` | | Accessible run records with ownership and permissions; `summary` has `rows`, `reviewable_rows`, `skus`, `documents`, original `needs_validation`/`auto_cleared`, flat classification keys over reviewable rows, and live `review_progress`. A missing saved run is marked `unavailable: true`. |
 | POST | `/api/runs/from-path` | `{path}` (local folder) | run summary (below) |
 | POST | `/api/runs/upload` | multipart `files[]`; each filename may include a relative path such as `sku-001/bom.pdf` (use `webkitRelativePath` for folder drops) | run summary |
 | POST | `/api/demo/load` | | run summary (golden dataset) |
 | GET | `/api/runs/{run_id}` | | run summary |
 
-Run summary: `{run_id, timestamp, input_root, tool_version, skus, documents, documents_by_type:{BOM,LABEL,DRAWING,PCO}, unrecognised_files[], rows (all result rows), reviewable_rows (roles item + change), exempt_rows, header_rows_needing_validation (header/reference/coverage rows that need validation, e.g. REF mismatch or missing BOM), counts:{EXACT,EQUIVALENT,POTENTIAL,MISMATCH,MISSING} (reviewable rows), needs_validation and auto_cleared (reviewable rows; the review queue with needs_validation=true additionally lists header/coverage rows, so it can be larger by header_rows_needing_validation), per_check:{BOM_LABEL,BOM_DRAWING,LABEL_DRAWING,PCO_BOM,LABEL_REVISION}, blockers, coverage:[{kind, sku, status: OK|MISSING_BOM|MISSING_LABEL, detail, source}], groups:[{sku, family, document_ids[], warnings[]}], warnings[], parser_warnings:[{document, doc_id, warnings[]}], low_confidence_rows, state_counts:{ENGINE_RECOMMENDED, REVIEWER_1_COMPLETE, REVIEWER_2_COMPLETE, AGREED, DISAGREEMENT, FINALIZED}, terminology_version, terminology_count, relationships_used[], capabilities:{name: status}, thresholds, inputs:[{path, sha256, size_bytes, doc_type}]}`
+Run summary: `{run_id, timestamp, input_root, tool_version, skus, documents, documents_by_type:{BOM,LABEL,DRAWING,PCO}, unrecognised_files[], rows (all result rows), reviewable_rows (roles item + change), exempt_rows, header_rows_needing_validation (header/reference/coverage rows that need validation, e.g. REF mismatch or missing BOM), counts:{EXACT,EQUIVALENT,POTENTIAL,MISMATCH,MISSING} (reviewable rows), needs_validation and auto_cleared (original engine counts over reviewable rows), per_check:{BOM_LABEL,BOM_DRAWING,LABEL_DRAWING,PCO_BOM,LABEL_REVISION}, blockers, coverage:[{kind, sku, status: OK|MISSING_BOM|MISSING_LABEL, detail, source}], groups:[{sku, family, document_ids[], warnings[]}], warnings[], parser_warnings:[{document, doc_id, warnings[]}], low_confidence_rows, state_counts:{ENGINE_RECOMMENDED, REVIEWED, FINALIZED}, review_progress, terminology_version, terminology_count, relationships_used[], capabilities:{name: status}, thresholds, inputs:[{path, sha256, size_bytes, doc_type}]}`
+
+`review_progress` is computed from a single current decision/approval snapshot across every result row:
+`{pending, awaiting_review, awaiting_approval, approved, needs_information, unresolved_rows,
+confirmed_discrepancies, blockers, low_confidence_rows, discrepancies:[{type, count, severity}]}`.
+The discrepancy aggregation counts distinct rows per type, without a page limit. `state_counts`
+counts the same snapshot. Original engine counts and evidence remain unchanged by review.
+
+A saved decision awaits approval, including a decision on an originally clean row. An approved
+Exact/Equivalent acceptance or override clears its current finding. Approving a confirmed discrepancy
+completes review while retaining the finding. Needs-more-information decisions stay pending even
+when approved. Editing an approved row reopens review.
 
 ## Results (review queue)
-`GET /api/runs/{run_id}/results` params: `check` (BOM_LABEL|BOM_DRAWING|LABEL_DRAWING|PCO_BOM|LABEL_REVISION), `sku`, `classification` (EXACT|EQUIVALENT|POTENTIAL|MISMATCH|MISSING), `severity` (BLOCKER|MAJOR|MINOR|INFO), `discrepancy` (type name), `needs_validation` (true/false), `state`, `role` (item|header|reference|coverage|exempt|change), `search`, `limit` (default 500), `offset`. (`viewer` and `blind` are still accepted but ignored when a session is present.)
+`GET /api/runs/{run_id}/results` params: `check` (BOM_LABEL|BOM_DRAWING|LABEL_DRAWING|PCO_BOM|LABEL_REVISION), `sku`, `classification` (current effective classification), `engine_classification` (original EXACT|EQUIVALENT|POTENTIAL|MISMATCH|MISSING), `unresolved` (true/false), `severity` (BLOCKER|MAJOR|MINOR|INFO), `discrepancy` (type name), `needs_validation` (true/false), `state`, `role` (item|header|reference|coverage|exempt|change), `search`, `limit` (default 500), `offset`. (`viewer` and `blind` are still accepted but ignored when a session is present.)
+`needs_validation` filters current `pending_review`, and `severity` filters `current_severity`. With `unresolved=true`, `discrepancy` filters current findings; otherwise it filters original evidence. The UI defaults to pending rows; `nv=0` removes that filter.
 Default order: blocker → major → ambiguous → potential → low-confidence → sku → row id.
-Returns `{total, offset, limit, rows:[{row_id, sku, check, role, engine:{classification, match_level, score, relationship_id, requires_validation, severity, discrepancies[], explanation}, decisions:{"1": Decision|null, "2": Decision|null}, state, final, effective_classification, a:{item_number, description, quantity, page, locator, file_name}|null, b:{...}|null, discrepancies:[{type, severity, detail, recommended_action}], action_items[]}]}`.
+Returns `{total, offset, limit, rows:[{row_id, sku, check, role, engine:{classification, match_level, score, relationship_id, requires_validation, severity, discrepancies[], explanation}, decisions:{"1": Decision|null, "2": Decision|null}, state, final, effective_classification, pending_review, unresolved, current_severity, current_discrepancies, a:{item_number, description, quantity, page, locator, file_name}|null, b:{...}|null, discrepancies:[{type, severity, detail, recommended_action}], action_items[]}]}`.
 Also returns `viewer: {slot, blind, reviewer}` — the visibility actually applied.
-Decision: `{slot, reviewer, decision, comment, override_classification, decided_at, blind}`. For a blind
-reviewer 2, until they have decided a row, that row's `decisions["1"]` is `null`, `state` reads
-`ENGINE_RECOMMENDED`, `final` is `null` and `effective_classification` shows the engine value — reviewer
-1's work is hidden completely, not just in the decision field.
+Decision: `{slot, reviewer, decision, comment, override_classification, decided_at, blind}`.
+`effective_classification` includes the saved shared override. Approval is recorded separately in
+`final`, including `self_approved`, the approver, timestamp and note.
 
-`GET /api/runs/{run_id}/results/{row_id}` → `{result: full CheckResult (source_a/source_b with evidence), evidence:{a: Evidence|null, b: Evidence|null}, decisions, state, final, effective_classification, history:[{event: engine|reviewer_1|reviewer_2|final, ...}], viewer, action_items[]}`. For a blind reviewer 2 the history contains only the engine event.
+`GET /api/runs/{run_id}/results/{row_id}` → `{result: full CheckResult (source_a/source_b with evidence), evidence:{a: Evidence|null, b: Evidence|null}, decisions, state, final, effective_classification, revision, owner, permission, history:[{event: engine|change|approval, ...}], viewer, action_items[]}`.
 Evidence: `{doc_id, doc_type, file, file_name, sha256, page, bbox:{x0,y0,x1,y1}|null, locator, raw_text, sheet, item_number, description, quantity, uom, oper_seq, category, category_reason, confidence, attributes, sub_quantity}`.
 
 ## Documents and evidence images
@@ -107,8 +116,8 @@ Evidence: `{doc_id, doc_type, file, file_name, sha256, page, bbox:{x0,y0,x1,y1}|
 | GET | `/api/runs/{run_id}/documents/{doc_id}/pages/{n}?highlight={row_id}&dpi=110` | `image/png` of page n (1-based); with `highlight`, the evidence box of that row on this document is outlined. Bbox coordinates in Evidence are PDF points at 72 dpi; the image is rendered at `dpi`, so scale = dpi/72. 404 for spreadsheet sources. |
 
 ## Decisions
-| POST | `/api/runs/{run_id}/decisions` | `{row_id, decision: ACCEPT|OVERRIDE|CONFIRM_DISCREPANCY|NEEDS_MORE_INFORMATION, comment?, override_classification? (required for OVERRIDE)}` → `{row_id, state, decisions, effective_classification}`. Slot, reviewer name and the blind flag come from the session; a `slot` that contradicts the session is a 400. |
-| POST | `/api/runs/{run_id}/finalize` | `{row_id, final_decision, note?}` → `{row_id, state}` |
+| POST | `/api/runs/{run_id}/decisions` | `{row_id, decision: ACCEPT|OVERRIDE|CONFIRM_DISCREPANCY|NEEDS_MORE_INFORMATION, comment?, override_classification? (required for OVERRIDE), expected_revision}` → `{row_id, state, decisions, effective_classification}`. Actor comes from the session. Saving clears any previous approval and preserves its history. |
+| POST | `/api/runs/{run_id}/finalize` | `{row_id, final_decision, expected_revision, confirm_self_approval?, note?}` → `{row_id, state}`. Requires a saved decision matching the current revision and kind; approving one's own decision or run requires explicit self-approval confirmation. |
 | POST | `/api/runs/{run_id}/bulk-accept` | `{}` → `{accepted}` (only rows with no discrepancy and not needing validation) |
 | POST | `/api/runs/{run_id}/relationships/from-row` | `{row_id, scope? (global|family:<prefix>|sku:<code>), anchor? (bind to the BOM item number), canonical?, aliases?, doc_types?, notes?}` → Relationship |
 

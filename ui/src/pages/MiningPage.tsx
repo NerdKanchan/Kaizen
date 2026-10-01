@@ -157,7 +157,7 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
         count={wl.items.length > 0 ? `${wl.items.length} pairing${wl.items.length === 1 ? "" : "s"}` : undefined}
         description={
           <>
-            <span className="num">{wl.needs_validation}</span> comparisons need review in this run; <span className="num">{wl.potential_rows}</span> have suggested terminology matches.
+            The engine originally flagged <span className="num">{wl.needs_validation}</span> comparisons; <span className="num">{wl.potential_rows}</span> have suggested terminology matches for future runs. Current review approvals appear in the overview.
           </>
         }
       />
@@ -176,7 +176,7 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
         <>
           <div className="px-4 py-4 border-b border-line">
             <p className="text-lg text-ink max-w-[70ch]">
-              Confirming the top <span className="num font-semibold">{wl.top5.n}</span> matches could clear <span className="num font-semibold">{wl.top5.rows}</span> comparisons in future runs (<span className="num font-semibold">{wl.top5.pct}%</span> of the current review queue).
+              Confirming the top <span className="num font-semibold">{wl.top5.n}</span> matches could clear <span className="num font-semibold">{wl.top5.rows}</span> comparisons in future runs (<span className="num font-semibold">{wl.top5.pct}%</span> of the originally flagged comparisons).
             </p>
             <p className="text-sm text-ink-3 mt-1.5 max-w-[80ch]">
               The top {wl.top10.n} matches cover {wl.top10.rows} comparisons ({wl.top10.pct}%). Comparisons with discrepancies or ambiguous matches still need review.
@@ -186,7 +186,7 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
                 height={12}
                 segments={[
                   { label: `Clears with the top ${wl.top5.n}`, value: wl.top5.rows, color: CLASS_COLORS.EQUIVALENT },
-                  { label: "Still needs review", value: remaining, color: CLASS_COLORS.MISMATCH },
+                  { label: "Would still need review", value: remaining, color: CLASS_COLORS.MISMATCH },
                 ]}
               />
             </div>

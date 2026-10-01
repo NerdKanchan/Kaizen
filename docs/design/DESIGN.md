@@ -298,3 +298,27 @@ Reviewed on 2026-09-30:
 Validation and local backend limitations are recorded in
 [UX-verification.md](UX-verification.md). This refinement covers the shared system
 and copy across all twelve application pages and the authentication views.
+
+## Navigation and profile feedback
+
+This revision replaces the Current run / Recent run sidebar groups with a Runs
+section listing every run the signed-in account can access. Each run expands to
+Overview, Review queue, Documents, and a collapsible Analysis group. Workspace,
+Runs and Administration are independently collapsible. Disclosure choices are
+remembered per account in this browser; navigating to a run reveals its destination.
+The compact desktop rail keeps shortcuts for the selected run, while the mobile
+menu keeps the complete run tree.
+
+Section headings and workspace links use 13px type. Run destinations use 12px
+type, with 34px rows, consistent icons and one level of indentation. Long run
+names truncate visually and remain available in the button title.
+
+The account avatar and sidebar Profile link open `/profile`. This page shows the
+signed-in email, account role, review slot, review mode and session start time,
+plus owned/shared run counts, a theme control and sign out. These account details
+come from the existing session; no editable account fields are presented without
+a supporting API. Profile and top-bar theme controls stay in sync.
+
+Overview puts its review-queue action and flagged count beside the heading on
+desktop. On mobile the action follows the title. The Needs review metric includes
+an Open review queue link that selects Flagged only.

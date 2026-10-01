@@ -26,6 +26,7 @@ class Workspace:
         return cls(explicit or os.environ.get("KAIZEN_WORKSPACE") or DEFAULT_WORKSPACE)
 
     def register_run(self, run: Run, json_path: Path | str, record_usage: bool = True) -> None:
-        self.runs.register(run, json_path)
-        if record_usage:
-            self.repository.record_run_usage(run.metadata.run_id, run.relationship_usage)
+        with self.db.transaction():
+            self.runs.register(run, json_path)
+            if record_usage:
+                self.repository.record_run_usage(run.metadata.run_id, run.relationship_usage, snapshot=run.terminology_snapshot)

@@ -32,6 +32,13 @@ class ParseOutcome:
 
 
 def _by_filename(path: Path) -> DocType | None:
+    # Released BD files use identifiers without a separator (for example DWG1234567, LAB1234567).
+    # Content detection still takes precedence over these anchored fallbacks.
+    stem = path.stem.upper()
+    if re.match(r"^DWG\d{5,}(?:\b|_)", stem):
+        return DocType.DRAWING
+    if re.match(r"^LAB\d{5,}(?:\b|_)", stem):
+        return DocType.LABEL
     tokens = set(re.split(r"[^a-z0-9]+", path.stem.lower()))
     for doc_type, keys in _FILENAME_TOKENS.items():
         if tokens & keys:
@@ -91,6 +98,18 @@ def detect_doc_type(path: Path | str) -> DocType | None:
 
 def parse_document(path: Path | str) -> ParseOutcome:
     path = Path(path)
+    if path.suffix.lower() in (".xlsx", ".xlsm"):
+        with path.open("rb") as fh:
+            prefix = fh.read(65536)
+        if prefix.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            if "DRMEncryptedTransform".encode("utf-16le") in prefix:
+                # Microsoft Purview sensitivity label with rights management: there is no password to supply.
+                reason = "workbook is protected by a sensitivity label (rights management), so no password opens it; someone with access must open it in Excel and save an unprotected copy"
+            elif "EncryptedPackage".encode("utf-16le") in prefix:
+                reason = "encrypted Excel workbook; an unlocked copy is required"
+            else:
+                reason = "legacy Excel container with an XLSX extension; export as an unlocked XLSX workbook"
+            return ParseOutcome(str(path), None, None, reason)
     doc_type = detect_doc_type(path)
     ext = path.suffix.lower()
     if doc_type is DocType.BOM:
@@ -98,7 +117,7 @@ def parse_document(path: Path | str) -> ParseOutcome:
         return ParseOutcome(str(path), doc_type, doc)
     if doc_type is DocType.LABEL:
         if ext != ".pdf":
-            return ParseOutcome(str(path), doc_type, None, "label parser supports PDF only (image/OCR: NOT IMPLEMENTED)")
+            return ParseOutcome(str(path), doc_type, None, "label parser supports PDF only; tabular labels are NOT IMPLEMENTED")
         return ParseOutcome(str(path), doc_type, parse_label_pdf(path))
     if doc_type is DocType.DRAWING:
         if ext != ".pdf":

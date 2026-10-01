@@ -1,13 +1,13 @@
 """Check 1: BOM ↔ Label — the shared pairing engine with the quantity policy, plus a REF/parent row and a
 single BLOCKER when the label's contents could not be extracted. Non-physical BOM lines are never compared."""
 
-from kaizen.checks.base import RowIdFactory, header_item, pair_token
+from kaizen.checks.base import RowIdFactory, header_item, pair_token, unparsed_bom_rows
 from kaizen.checks.pairing import CheckPolicy, disc, merge_duplicate_items, run_pairing_check
 from kaizen.ingest.grouping import identity_key
 from kaizen.matching.ladder import MatchLadder
 from kaizen.models import CheckResult, CheckType, Classification, DiscrepancyType, Document, DocumentItem, ItemCategory, MatchLevel, Severity, Thresholds
 
-CHECK_VERSION = "2"
+CHECK_VERSION = "3"
 POLICY = CheckPolicy(check_type=CheckType.BOM_LABEL, row_letter="R", quantity_relevant=True, missing_a=DiscrepancyType.MISSING_IN_LABEL, missing_b=DiscrepancyType.MISSING_IN_BOM, a_label="BOM component", b_label="label line")
 
 
@@ -30,10 +30,15 @@ def comparable_bom_items(bom: Document) -> list[DocumentItem]:
 def run_bom_label_check(bom: Document, label: Document, ladder: MatchLadder, thresholds: Thresholds) -> list[CheckResult]:
     sku = bom.sku or label.sku or "UNKNOWN"
     ids = RowIdFactory(sku, "R", pair_token(bom.id, label.id))
-    results = [_ref_row(bom, label, sku, ids)]
+    results = [_ref_row(bom, label, sku, ids, thresholds)]
+    if not bom.items or bom.header.get("unreadable_pages"):
+        detail = f"BOM extraction incomplete ({bom.path}); label contents could not be checked reliably; " + "; ".join(bom.warnings)
+        results.append(CheckResult(row_id=ids.next(), sku=sku, check=CheckType.BOM_LABEL, role="header", source_a=header_item(bom, "BOM"), classification=Classification.MISSING, match_level=MatchLevel.NONE, score=0.0, explanation="BOM NOT EXTRACTED: " + detail, discrepancies=[disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.BLOCKER, detail)], requires_validation=True))
+        return results
+    results.extend(unparsed_bom_rows(bom, CheckType.BOM_LABEL, sku, ids))
     results.extend(_exempt_rows(bom, sku, ids))
     bom_items = comparable_bom_items(bom)
-    if not label.items:
+    if not label.items or label.header.get("unreadable_pages"):
         results.append(_label_unreadable_row(label, len(bom_items), sku, ids))
         return results
     results.extend(run_pairing_check(bom, bom_items, label, list(label.items), POLICY, ladder, thresholds, sku, ids))
@@ -51,13 +56,16 @@ def _exempt_rows(bom: Document, sku: str, ids: RowIdFactory) -> list[CheckResult
     return out
 
 
-def _ref_row(bom: Document, label: Document, sku: str, ids: RowIdFactory) -> CheckResult:
+def _ref_row(bom: Document, label: Document, sku: str, ids: RowIdFactory, thresholds: Thresholds) -> CheckResult:
     a, b = header_item(bom, "BOM parent"), header_item(label, "label REF")
     parent, ref = bom.sku, label.sku
     if parent and ref and identity_key(parent) == identity_key(ref):
-        if label.header.get("ref_confidence") == "inferred":
-            detail = f"label REF {ref} was inferred from the paired BOM; verify it belongs to BOM parent item {parent}"
+        if label.header.get("ref_confidence") == "inferred" or bom.header.get("parent_confidence") == "inferred":
+            detail = f"label REF {ref} or BOM parent {parent} was inferred; verify both source identities before clearing the pairing"
             return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.BOM_LABEL, role="header", source_a=a, source_b=b, normalized_a=parent, normalized_b=ref, classification=Classification.POTENTIAL, match_level=MatchLevel.NONE, score=0.0, explanation=detail, discrepancies=[disc(DiscrepancyType.REF_PARENT_MISMATCH, Severity.MAJOR, detail)], requires_validation=True)
+        if min(a.extraction_confidence, b.extraction_confidence) < thresholds.low_confidence:
+            detail = f"label REF {ref} matches BOM parent {parent}, but identity extraction has low confidence; verify both source identifiers"
+            return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.BOM_LABEL, role="header", source_a=a, source_b=b, normalized_a=parent, normalized_b=ref, classification=Classification.POTENTIAL, match_level=MatchLevel.EXACT, score=1.0, explanation=detail, discrepancies=[disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.MAJOR, detail)], requires_validation=True)
         return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.BOM_LABEL, role="header", source_a=a, source_b=b, normalized_a=parent, normalized_b=ref, classification=Classification.EXACT, match_level=MatchLevel.EXACT, score=1.0, explanation=f"REF {ref} on the label is the product family of BOM parent item {parent}")
     if parent and ref:
         detail = f"label REF {ref} (identity {identity_key(ref)}) does not match BOM parent item {parent} (identity {identity_key(parent)})"
@@ -70,5 +78,5 @@ def _ref_row(bom: Document, label: Document, sku: str, ids: RowIdFactory) -> Che
 
 
 def _label_unreadable_row(label: Document, n_components: int, sku: str, ids: RowIdFactory) -> CheckResult:
-    detail = f"no kit-contents lines were extracted from the label ({label.path}); {n_components} comparable BOM components could not be checked and are deliberately not listed as MISSING one by one"
+    detail = f"kit-contents extraction is incomplete for the label ({label.path}); {n_components} comparable BOM components could not be checked and are deliberately not listed as MISSING one by one"
     return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.BOM_LABEL, role="header", source_a=None, source_b=header_item(label, "label"), classification=Classification.MISSING, match_level=MatchLevel.NONE, score=0.0, explanation=f"LABEL NOT EXTRACTED: {detail}", discrepancies=[disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.BLOCKER, detail + "; " + ("; ".join(label.warnings) or "no parser warnings"))], requires_validation=True)

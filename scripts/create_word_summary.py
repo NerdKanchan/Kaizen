@@ -7,7 +7,6 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
-
 OUT = Path("output/docx/kaizen-project-summary.docx")
 
 

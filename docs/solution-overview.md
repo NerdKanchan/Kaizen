@@ -197,7 +197,10 @@ to use this; the tool works the same without it.
 
 We could not obtain real documents before the build window, so we built a **synthetic test set** that
 mirrors the layouts shown in the brief: ten SKU sets, 38 documents, with 30 deliberately planted
-discrepancies whose locations we know. Then we measured.
+discrepancies whose locations we know. Then we measured. The figures below describe that synthetic set.
+The later BD delivery now has separate extraction validation: 373 BOM rows agree with reference exports,
+140 label quantities agree with image transcription, and named callouts are checked on every drawing sheet.
+Real matching accuracy still needs reviewed ground truth; see [real-data validation](real-data-validation.md).
 
 | What we measured | Result |
 |---|---|
@@ -246,12 +249,11 @@ figures are calculated, not yet observed with real reviewers; validating them is
 
 ## 12. Honest limitations and what happens next
 
-- **Everything has been tested on synthetic documents.** They copy the layouts in the brief, but a real
-  JDE print or MasterControl label may differ. The parsers report what they cannot read rather than
-  guessing, but until we run real files we cannot promise the same accuracy. This is the highest-risk item
-  and the first thing to do at checkpoint one: get three to five real, redacted sets and re-tune.
-- Scanned (image-only) BOMs and drawings and hand-drawn redlines are not read yet. Text-based PDFs and
-  spreadsheets are. Label scans fall back to OCR when it is installed.
+- **Real extraction has been tested; real matching accuracy is still unmeasured.** Four supplied SKU sets
+  now run through all three BOM/label/drawing comparisons. JDE abbreviations and compound assembly entries
+  need approved mappings, and the supplied encrypted relationship workbook cannot yet be imported.
+- Scanned BOM, label and drawing pages use installed offline OCR. Diagram text is read, but photographed
+  part identity, leader endpoints, placement and hand-drawn redlines are not verified.
 - Descriptions that JDE cuts off mid-word are matched by similarity, not by a special rule.
 - The review database is local and single-user. A shared server with login would be the production step.
 - Case labels are not parsed yet, only unit labels.

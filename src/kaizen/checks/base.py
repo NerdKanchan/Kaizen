@@ -1,6 +1,6 @@
 """Shared helpers for checks: row ids, classification mapping, recommended actions."""
 
-from kaizen.models import Classification, DiscrepancyType, DocType, Document, DocumentItem, Evidence, ItemCategory, MatchLevel
+from kaizen.models import CheckResult, CheckType, Classification, Discrepancy, DiscrepancyType, DocType, Document, DocumentItem, Evidence, ItemCategory, MatchLevel, Severity
 
 CLASSIFICATION_BY_LEVEL = {
     MatchLevel.EXACT: Classification.EXACT,
@@ -71,5 +71,25 @@ def header_item(doc: Document, kind_desc: str) -> DocumentItem:
     return DocumentItem(
         id=f"{doc.id}:header", doc_id=doc.id, doc_type=doc.doc_type, sku=doc.sku, item_number=code or None, description=desc or kind_desc,
         category=ItemCategory.ADMINISTRATIVE, category_reason="document header", attributes={"kind": "header"},
-        evidence=Evidence(file=doc.path, file_sha256=doc.sha256, page=1 if doc.path.lower().endswith(".pdf") else None, raw_text=raw, locator="document header"),
+        extraction_confidence=doc.header.get("identity_confidence", 1.0),
+        evidence=Evidence(file=doc.path, file_sha256=doc.sha256, locator="document header", **{"page": 1 if doc.path.lower().endswith(".pdf") else None, "raw_text": raw, **doc.header.get("identity_evidence", {})}),
     )
+
+
+def unparsed_bom_rows(bom: Document, check: CheckType, sku: str, ids: RowIdFactory) -> list[CheckResult]:
+    """One blocker per BOM line that looked like a component but could not be parsed. The rest of the
+    BOM is still compared, so a single odd row never hides every other finding for the SKU."""
+    out: list[CheckResult] = []
+    for n, row in enumerate(bom.header.get("unparsed_rows", []), start=1):
+        detail = f"BOM row on page {row['page']} could not be parsed and was not compared: '{row['text']}'. Check it against the source page."
+        item = DocumentItem(
+            id=f"{bom.id}:unparsed{n}", doc_id=bom.id, doc_type=bom.doc_type, sku=bom.sku, description=row["text"],
+            category=ItemCategory.ADMINISTRATIVE, category_reason="BOM line that could not be parsed", attributes={"kind": "unparsed_row"}, extraction_confidence=0.0,
+            evidence=Evidence(file=bom.path, file_sha256=bom.sha256, page=row["page"], bbox=row.get("bbox"), raw_text=row["text"], locator=f"page {row['page']}, unparsed row"),
+        )
+        out.append(CheckResult(
+            row_id=ids.next(), sku=sku, check=check, role="header", source_a=item, classification=Classification.MISSING, match_level=MatchLevel.NONE, score=0.0,
+            explanation="BOM ROW NOT PARSED: " + detail, requires_validation=True,
+            discrepancies=[Discrepancy(type=DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, severity=Severity.BLOCKER, detail=detail, recommended_action=RECOMMENDED_ACTION.get(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, ""))],
+        ))
+    return out

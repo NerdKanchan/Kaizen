@@ -87,6 +87,8 @@ def _status(before: CheckResult | None, after: CheckResult | None) -> tuple[str,
         return ("new", "a discrepancy that was not there before") if after.discrepancies else ("changed", "a new comparison with no discrepancy")
     assert before is not None and after is not None
     b_disc, a_disc = bool(before.discrepancies), bool(after.discrepancies)
+    if b_disc and not a_disc and after.requires_validation:
+        return "still_open", "no discrepancy is reported, but the later comparison still requires validation"
     if b_disc and not a_disc:
         return "resolved", "the discrepancy is no longer reported"
     if not b_disc and a_disc:

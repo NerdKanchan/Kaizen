@@ -7,9 +7,13 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-NORMALIZER_VERSION = "1"
+NORMALIZER_VERSION = "2"
 
 _TRADEMARK_CHARS = "™®©℠"  # ™ ® © ℠ — stripped before NFKC (NFKC would turn ™ into "TM")
+# OCR writes the ™ sign as the letters TM, glued to the name (SherlockTM, 3CGTM) or as a separate word.
+# Both are dropped like the symbol. A glued TM is removed only from words holding a lowercase letter or a
+# digit, so an all-caps word such as ATM is left alone.
+_TEXT_TRADEMARK_RE = re.compile(r"\b((?=[A-Za-z0-9]*[a-z0-9])[A-Za-z0-9]{2,}?)TM\b")
 _DASHES = "–—‐‑‒"  # – — ‐ ‑ ‒
 _UNITS = ("ML", "CM", "MM", "IN", "FT", "MG", "KG", "GA", "FR", "CC", "OZ", "G", "F", "L", "M")
 _UNIT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(" + "|".join(_UNITS) + r")\b\.?")
@@ -54,6 +58,7 @@ def _singularize(token: str) -> str:
 
 def normalize(text: str) -> NormalizedText:
     s = text.translate({ord(c): None for c in _TRADEMARK_CHARS})
+    s = _TEXT_TRADEMARK_RE.sub(r"\1", s)
     s = unicodedata.normalize("NFKC", s)
     s = s.translate({ord(c): "-" for c in _DASHES})
     s = s.upper()
@@ -65,7 +70,7 @@ def normalize(text: str) -> NormalizedText:
     s = _DIM_RE.sub(r"\1 X \2", s)
     s = _PUNCT_RE.sub(" ", s)
     s = _STRAY_DOT_RE.sub(" ", s)
-    tokens = [ABBREVIATIONS.get(t, t) for t in s.split()]
+    tokens = [ABBREVIATIONS.get(t, t) for t in s.split() if t != "TM"]
     tokens = [_singularize(t) for t in tokens]
     normalized = " ".join(tokens)
     numeric_tokens = [t for t in tokens if _NUMERIC_TOKEN_RE.match(t)]

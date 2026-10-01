@@ -58,6 +58,8 @@ export const DISCREPANCY_TYPES = [
 ];
 
 export interface Health {
+  api_contract?: number;
+  restart_required?: boolean;
   status: string;
   version: string;
   workspace?: string;
@@ -65,6 +67,7 @@ export interface Health {
 }
 
 export interface RunListItem {
+  unavailable?: boolean;
   name: string;
   owner: string;
   permission: "owner" | "edit" | "view";
@@ -75,7 +78,20 @@ export interface RunListItem {
   tool_version: string;
   terminology_version: string;
   json_path: string;
-  summary: { rows: number; skus: number; documents: number; needs_validation: number } & Record<Classification, number>;
+  summary: { rows: number; skus: number; documents: number; needs_validation: number; auto_cleared?: number; review_progress?: ReviewProgress } & Record<Classification, number>;
+}
+
+export interface ReviewProgress {
+  pending: number;
+  awaiting_review: number;
+  awaiting_approval: number;
+  approved: number;
+  needs_information: number;
+  unresolved_rows: number;
+  confirmed_discrepancies: number;
+  blockers: number;
+  low_confidence_rows: number;
+  discrepancies: { type: string; count: number; severity: Severity }[];
 }
 
 export interface Coverage {
@@ -133,6 +149,7 @@ export interface RunSummary {
   parser_warnings: ParserWarning[];
   low_confidence_rows: number;
   state_counts: Record<ReviewState, number>;
+  review_progress: ReviewProgress;
   terminology_version: string;
   terminology_count: number;
   relationships_used: string[];
@@ -186,6 +203,10 @@ export interface EngineView {
   explanation: string;
 }
 export interface ResultRow {
+  pending_review: boolean;
+  unresolved: boolean;
+  current_severity: Severity | null;
+  current_discrepancies: Discrepancy[];
   row_id: string;
   sku: string;
   check: CheckType;
@@ -207,6 +228,8 @@ export interface ResultsPage {
   rows: ResultRow[];
 }
 export interface ResultsQuery {
+  engine_classification?: string;
+  unresolved?: boolean;
   check?: string;
   sku?: string;
   classification?: string;

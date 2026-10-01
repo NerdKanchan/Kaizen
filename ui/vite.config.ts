@@ -11,6 +11,6 @@ export default defineConfig({
     port: 5173,
     proxy: { "/api": { target: "http://127.0.0.1:8765", changeOrigin: false } },
   },
-  // Unit tests for browser-free logic (theme rules); the pages are verified in a real browser.
-  test: { environment: "node", include: ["src/**/*.test.ts"] },
+  // Hook tests opt into jsdom; pure logic tests use Node.
+  test: { environment: "node", include: ["src/**/*.test.{ts,tsx}"] },
 });

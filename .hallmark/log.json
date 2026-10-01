@@ -2,6 +2,14 @@
   {
     "date": "2026-09-30",
     "scope": "app",
+    "macrostructure": "Workbench \u2014 expandable run tree and account profile",
+    "theme": "Existing BD identity with neutral light and charcoal dark surfaces",
+    "enrichment": "none",
+    "brief": "Apply five browser comments: run disclosures, compact navigation, profile and direct overview review links"
+  },
+  {
+    "date": "2026-09-30",
+    "scope": "app",
     "macrostructure": "Workbench \u2014 compact run summary and document review with decision sidebar",
     "theme": "Existing BD identity with neutral light and charcoal dark surfaces",
     "enrichment": "none",

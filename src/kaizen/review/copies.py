@@ -49,7 +49,7 @@ def copy_run(ws, run: Run, actor: str) -> Run:
     try:
         copied = snapshot(run, folder, rid)
         path = save_run(copied, folder / 'run.json')
-        with ws.db.lock:
+        with ws.db.transaction():
             source = ws.runs.get(run.metadata.run_id)
             ws.register_run(copied, path)
             ws.db.conn.execute('UPDATE runs SET name=?, owner=?, copied_from=? WHERE run_id=?', (f"{source['name'] or 'Review'} — Copy", actor, run.metadata.run_id, rid))
@@ -63,6 +63,8 @@ def copy_run(ws, run: Run, actor: str) -> Run:
             for row in ws.db.conn.execute('SELECT * FROM action_items WHERE run_id=?', (run.metadata.run_id,)):
                 fields = dict(row)
                 fields.update(id='AI-' + uuid.uuid4().hex[:16], run_id=rid, resolved_in_run='', resolved_at='')
+                if fields['status'] == 'RESOLVED':
+                    fields['status'] = 'OPEN'
                 names = ','.join(fields)
                 ws.db.conn.execute(f'INSERT INTO action_items ({names}) VALUES ({",".join("?" for _ in fields)})', tuple(fields.values()))
             ws.db.audit(actor, 'run.copied', f'{rid} copied from {run.metadata.run_id}; approvals reset')

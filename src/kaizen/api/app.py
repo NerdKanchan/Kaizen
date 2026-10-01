@@ -1,6 +1,8 @@
 """FastAPI backend for approved accounts and shared document reviews."""
 
+import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -14,16 +16,32 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pymupdf
-from fastapi import Body, Cookie, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi import Response as FastResponse
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from kaizen import __version__
-from kaizen.models import Classification, Run, Thresholds
-from kaizen.pipeline import load_run, run_folder, save_run
+from kaizen.api.payloads import (
+    ActionInput,
+    ActionUpdate,
+    ApprovalInput,
+    ChangeNote,
+    Credentials,
+    DecisionInput,
+    MiningInput,
+    RelationshipInput,
+    RelationshipUpdate,
+    RowRelationship,
+    RunName,
+    RunPath,
+    RunShare,
+    UserUpdate,
+)
+from kaizen.models import Classification, DocType, Run, Thresholds
+from kaizen.pipeline import SUPPORTED_SUFFIXES, load_run, run_folder, save_run
 from kaizen.reporting.annotated_bom import write_annotated_bom
 from kaizen.reporting.certificate import write_certificate, write_run_certificate
 from kaizen.reporting.excel import ReviewBundle, export_with_review
@@ -35,6 +53,7 @@ from kaizen.review.business import BusinessAssumptions, business_case
 from kaizen.review.collaborative import CollaborativeReviewStore
 from kaizen.review.copies import copy_run, portable_payload, snapshot
 from kaizen.review.mining import approve_suggestion, mine_suggestions, reject_suggestion, terminology_worklist
+from kaizen.review.progress import review_snapshot
 from kaizen.review.rundiff import diff_runs
 from kaizen.review.sessions import ReviewSession, SessionStore
 from kaizen.review.store import ReviewStore
@@ -44,6 +63,30 @@ from kaizen.workspace import Workspace
 SESSION_COOKIE = "kaizen_session"
 SIGN_IN_HINT = "Sign in first: POST /api/auth/signin with your approved BD email and password."
 BLIND_REFUSAL = "Not available while you are reviewing blind: it would reveal reviewer 1's decisions. End your blind session or ask reviewer 1."
+API_CONTRACT = 3
+MAX_UPLOAD_BYTES = 250 * 1024 * 1024
+MAX_IMPORT_BYTES = 10 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
+
+async def _save_import(file: UploadFile, dest: Path) -> None:
+    total = 0
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open('wb') as output:
+        while chunk := await file.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_IMPORT_BYTES:
+                raise HTTPException(413, 'Import a workbook or CSV of at most 10 MB.')
+            output.write(chunk)
+
+
+def _source_fingerprint() -> str:
+    root = Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob('*.py')):
+        digest.update(path.relative_to(root).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 # ---- sign-in -----------------------------------------------------------------------------------
 def _bd_email(raw: str) -> str:
@@ -80,7 +123,10 @@ class RunCache:
         rec = self.ws.runs.get(run_id)
         if rec is None:
             raise HTTPException(404, f"run {run_id} not found")
-        run = load_run(rec["json_path"])
+        try:
+            run = load_run(rec["json_path"])
+        except FileNotFoundError:
+            raise HTTPException(404, "The saved run is unavailable. Upload its source documents again.")
         self._runs[run_id] = run
         return run
 
@@ -98,6 +144,7 @@ def _summary(run: Run, review: ReviewStore, viewer_slot: int = 1, blind: bool = 
     counts = {c.value: sum(1 for r in rev if r.classification is c) for c in Classification}
     needs = sum(1 for r in rev if r.requires_validation)
     header_needs = sum(1 for r in run.results if r.role in ("header", "reference", "coverage") and r.requires_validation)
+    _, progress, states = review_snapshot(run, review, viewer_slot, blind)
     return {
         "run_id": run.metadata.run_id, "timestamp": run.metadata.timestamp.isoformat(), "input_root": run.metadata.input_root, "tool_version": run.metadata.tool_version,
         "skus": len(run.groups), "documents": len(run.documents), "documents_by_type": {t: sum(1 for d in run.documents if d.doc_type.value == t) for t in ("BOM", "LABEL", "DRAWING", "PCO")},
@@ -108,7 +155,7 @@ def _summary(run: Run, review: ReviewStore, viewer_slot: int = 1, blind: bool = 
         "coverage": [c.model_dump() for c in run.coverage], "groups": [g.model_dump() for g in run.groups], "warnings": run.warnings,
         "parser_warnings": [{"document": Path(d.path).name, "doc_id": d.id, "warnings": d.warnings} for d in run.documents if d.warnings],
         "low_confidence_rows": sum(1 for r in run.results for d in r.discrepancies if d.type.value == "LOW_EXTRACTION_CONFIDENCE"),
-        "state_counts": review.state_counts(run.metadata.run_id, run.results, viewer_slot, blind), "terminology_version": run.metadata.terminology_version, "terminology_count": run.metadata.terminology_count,
+        "state_counts": states, "review_progress": progress, "terminology_version": run.metadata.terminology_version, "terminology_count": run.metadata.terminology_count,
         "relationships_used": run.relationships_used, "capabilities": run.metadata.capabilities, "thresholds": run.metadata.thresholds.model_dump(),
         "inputs": [i.model_dump() for i in run.metadata.inputs],
     }
@@ -123,14 +170,21 @@ def _evidence(item) -> dict[str, Any] | None:
 
 
 def _queue_sort_key(r):
-    sev = r.severity.value if r.severity else None
-    types = {d.type.value for d in r.discrepancies}
-    return (SEVERITY_RANK[sev], 0 if "AMBIGUOUS_MATCH" in types else 1, 0 if r.classification is Classification.POTENTIAL else 1, 0 if "LOW_EXTRACTION_CONFIDENCE" in types else 1, r.sku, r.row_id)
+    types = {d['type'] for d in r['current_discrepancies']}
+    return (SEVERITY_RANK[r['current_severity']], 0 if "AMBIGUOUS_MATCH" in types else 1, 0 if r['effective_classification'] == 'POTENTIAL' else 1, 0 if "LOW_EXTRACTION_CONFIDENCE" in types else 1, r['sku'], r['row_id'])
 
 
 def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, accounts: LocalAccounts | SupabaseAccounts | None = None) -> FastAPI:
     ws = workspace or Workspace.resolve(None)
     app = FastAPI(title="Kaizen Cross-Check", version=__version__)
+    source_fingerprint = _source_fingerprint()
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, exc: Exception):
+        reference = uuid.uuid4().hex[:12]
+        logger.error("Request %s failed: %s %s", reference, request.method, request.url.path, exc_info=exc)
+        return JSONResponse(status_code=500, content={"detail": f"The server could not complete this request. Error reference: {reference}. See the Kaizen server log for details."})
+
     cache = RunCache(ws)
     review = CollaborativeReviewStore(ws.db)
     access = AccessStore(ws.db)
@@ -165,23 +219,29 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
             return session.slot, session.blind
         return (viewer if viewer in (1, 2) else 1), bool(blind)
 
-    def _actor(session: ReviewSession | None, fallback: str) -> str:
-        return session.reviewer if session is not None else (fallback or "reviewer")
-
     def _refuse_if_blind(session: ReviewSession | None) -> None:
         if session is not None and session.blind:
             raise HTTPException(403, BLIND_REFUSAL)
 
     def run_path(path: Path, actor: str, name: str = "") -> dict[str, Any]:
-        if not path.exists():
+        if not path.is_dir():
             raise HTTPException(400, f"folder not found: {path}")
+        if len(name.strip()) > 120:
+            raise HTTPException(400, "Run name must contain at most 120 characters.")
         run = run_folder(path.resolve(), ws.repository.store(), Thresholds())
+        if not any(doc.items or (doc.doc_type is DocType.DRAWING and (doc.sku or doc.header.get('drawing_number'))) for doc in run.documents):
+            warnings = run.warnings + [warning for doc in run.documents for warning in doc.warnings]
+            raise HTTPException(400, "No usable BOM, label, drawing or PCO data could be extracted. " + " ".join(warnings[:3]))
         run.metadata.run_id = uuid.uuid4().hex
-        cache.put(run)
         label = name.strip()[:120] or f"{path.name.replace('_', ' ').replace('-', ' ').title()} · Review · {datetime.now(timezone.utc):%d %b %Y}"
-        with ws.db.lock:
-            ws.db.conn.execute('UPDATE runs SET owner=?, name=? WHERE run_id=?', (actor, label, run.metadata.run_id))
-            ws.db.conn.commit()
+        try:
+            with ws.db.transaction():
+                cache.put(run)
+                ws.db.conn.execute('UPDATE runs SET owner=?, name=? WHERE run_id=?', (actor, label, run.metadata.run_id))
+        except Exception:
+            cache._runs.pop(run.metadata.run_id, None)
+            shutil.rmtree(ws.runs_dir / run.metadata.run_id, ignore_errors=True)
+            raise
         return _summary(run, review) | run_info(run.metadata.run_id, actor)
 
     def require_run(run_id: str, actor: str, edit: bool = False, owner: bool = False):
@@ -244,7 +304,8 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return [dict(r) for r in ws.db.conn.execute('SELECT * FROM profiles ORDER BY created_at DESC')]
 
     @app.patch('/api/admin/users/{email}')
-    def update_user(email: str, payload: dict = Body(...), session=Depends(_identified)):
+    def update_user(email: str, payload: UserUpdate, session=Depends(_identified)):
+        payload = payload.model_dump(exclude_unset=True)
         try:
             current = access.profile(email)
             if current is None:
@@ -262,7 +323,8 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return [dict(r) for r in ws.db.conn.execute('SELECT email,permission,shared_by,shared_at FROM run_shares WHERE run_id=? ORDER BY email', (run_id,))]
 
     @app.put('/api/runs/{run_id}/sharing')
-    def share_run(run_id: str, payload: dict = Body(...), session=Depends(_identified)):
+    def share_run(run_id: str, payload: RunShare, session=Depends(_identified)):
+        payload = payload.model_dump()
         try:
             access.share(run_id, payload.get('email', ''), payload.get('permission'), session.reviewer)
         except ValueError as e:
@@ -270,7 +332,8 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return get_sharing(run_id)
 
     @app.patch('/api/runs/{run_id}')
-    def rename_run(run_id: str, payload: dict = Body(...), session=Depends(_identified)):
+    def rename_run(run_id: str, payload: RunName, session=Depends(_identified)):
+        payload = payload.model_dump()
         name = str(payload.get('name', '')).strip()
         if not name or len(name) > 120:
             raise HTTPException(400, 'Run name must contain 1–120 characters.')
@@ -325,8 +388,9 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return s.to_dict("required") | {"is_admin": bool(access.profile(reviewer)["is_admin"])}
 
     @app.post("/api/auth/signup")
-    def signup(payload: dict = Body(...)):
+    def signup(payload: Credentials):
         """Register a BD account; access remains pending until an administrator approves it."""
+        payload = payload.model_dump()
         email = _bd_email(payload.get("email", ""))
         try:
             accounts.sign_up(email, str(payload.get("password", "")))
@@ -336,8 +400,9 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return {"ok": True, "email": email, "status": "pending"}
 
     @app.post("/api/auth/signin")
-    def signin(response: FastResponse, payload: dict = Body(...)):
+    def signin(response: FastResponse, payload: Credentials):
         """Open a session only after password verification and application approval."""
+        payload = payload.model_dump()
         email = _bd_email(payload.get("email", ""))
         try:
             accounts.sign_in(email, str(payload.get("password", "")))
@@ -366,14 +431,31 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": __version__, "hosted": os.environ.get("KAIZEN_HOSTED") == "1"}
+        try:
+            restart_required = _source_fingerprint() != source_fingerprint
+        except OSError:
+            restart_required = True
+        return {"status": "ok", "version": __version__, "api_contract": API_CONTRACT, "restart_required": restart_required, "hosted": os.environ.get("KAIZEN_HOSTED") == "1"}
 
     @app.get("/api/runs")
     def list_runs(session=Depends(_identified)):
-        return [r | run_info(r['run_id'], session.reviewer) for r in ws.runs.list() if access.permission(r['run_id'], session.reviewer)]
+        out = []
+        for record in ws.runs.list():
+            if not access.permission(record['run_id'], session.reviewer):
+                continue
+            try:
+                summary = _summary(cache.get(record['run_id']), review)
+                record['summary'] = {**summary['counts'], **{key: summary[key] for key in ('rows', 'reviewable_rows', 'skus', 'documents', 'needs_validation', 'auto_cleared', 'review_progress')}}
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                record['unavailable'] = True
+            out.append(record | run_info(record['run_id'], session.reviewer))
+        return out
 
     @app.post("/api/runs/from-path")
-    def run_from_path(payload: dict = Body(...), session=Depends(_identified)):
+    def run_from_path(payload: RunPath, session=Depends(_identified)):
+        payload = payload.model_dump()
         return run_path(Path(payload["path"]), session.reviewer, str(payload.get("name", "")))
 
     @app.post("/api/runs/upload")
@@ -382,17 +464,24 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         total = 0
         seen = set()
         try:
+            if not files or not any(Path(f.filename or "").suffix.lower() in SUPPORTED_SUFFIXES for f in files):
+                raise HTTPException(400, "Choose a folder containing PDF, XLSX, XLSM or CSV documents.")
             for f in files:
-                rel = Path(f.filename or "file")
-                if rel.is_absolute() or ".." in rel.parts or not rel.name or rel in seen:
+                filename = (f.filename or "").replace("\\", "/")
+                rel = Path(filename)
+                if not filename or "\x00" in filename or re.match(r"^[A-Za-z]:", filename) or rel.is_absolute() or ".." in rel.parts or not rel.name or rel in seen:
                     raise HTTPException(400, f"Invalid or duplicate upload path: {f.filename}")
                 seen.add(rel)
+                if rel.suffix.lower() not in SUPPORTED_SUFFIXES or rel.name.startswith((".", "~$")):
+                    continue
+                if any(parent in seen for parent in rel.parents) or any(rel in other.parents for other in seen):
+                    raise HTTPException(400, "An upload path is used as both a file and a folder.")
                 dest = target / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with dest.open('wb') as output:
                     while chunk := await f.read(1024 * 1024):
                         total += len(chunk)
-                        if total > 250 * 1024 * 1024:
+                        if total > MAX_UPLOAD_BYTES:
                             raise HTTPException(413, 'Upload at most 250 MB per run.')
                         output.write(chunk)
             label = name or f"{Path(files[0].filename or 'Project').parts[0]} · Review · {datetime.now(timezone.utc):%d %b %Y}"
@@ -400,6 +489,9 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         except Exception:
             shutil.rmtree(target, ignore_errors=True)
             raise
+        finally:
+            for file in files:
+                await file.close()
 
     @app.post("/api/demo/load")
     def demo_load(session=Depends(_identified)):
@@ -412,11 +504,10 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str, session: ReviewSession | None = Depends(_identified)):
-        slot, blind = _view_of(session)
         return _summary(cache.get(run_id), review) | run_info(run_id, session.reviewer)
 
     @app.get("/api/runs/{run_id}/results")
-    def get_results(run_id: str, check: str | None = None, sku: str | None = None, classification: str | None = None, severity: str | None = None, discrepancy: str | None = None, needs_validation: bool | None = None, state: str | None = None, role: str | None = None, viewer: int = 1, blind: bool = False, limit: int = 500, offset: int = 0, search: str | None = None, session: ReviewSession | None = Depends(_identified)):
+    def get_results(run_id: str, check: str | None = None, sku: str | None = None, classification: str | None = None, engine_classification: str | None = None, severity: str | None = None, discrepancy: str | None = None, needs_validation: bool | None = None, unresolved: bool | None = None, state: str | None = None, role: str | None = None, viewer: int = 1, blind: bool = False, limit: int = Query(500, ge=1, le=5000), offset: int = Query(0, ge=0), search: str | None = None, session: ReviewSession | None = Depends(_identified)):
         slot, blind = _view_of(session, viewer, blind)
         run = cache.get(run_id)
         rows = run.results
@@ -424,26 +515,35 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
             rows = [r for r in rows if r.check.value == check]
         if sku:
             rows = [r for r in rows if r.sku == sku]
-        if classification:
-            rows = [r for r in rows if r.classification.value == classification]
-        if severity:
-            rows = [r for r in rows if (r.severity.value if r.severity else None) == severity]
-        if discrepancy:
-            rows = [r for r in rows if any(d.type.value == discrepancy for d in r.discrepancies)]
-        if needs_validation is not None:
-            rows = [r for r in rows if r.requires_validation == needs_validation]
+        if engine_classification:
+            rows = [r for r in rows if r.classification.value == engine_classification]
         if role:
             rows = [r for r in rows if r.role == role]
         if search:
             s = search.lower()
-            rows = [r for r in rows if s in (r.source_a.description if r.source_a else "").lower() or s in (r.source_b.description if r.source_b else "").lower() or s in (r.source_a.item_number or "" if r.source_a else "").lower() or s in r.explanation.lower()]
-        rows = sorted(rows, key=_queue_sort_key)
-        merged = review.rows_for_viewer(run_id, rows, viewer_slot=slot, blind=blind)
+            rows = [r for r in rows if s in r.sku.lower() or s in r.explanation.lower() or any(s in (item.description + " " + (item.item_number or "")).lower() for item in (r.source_a, r.source_b) if item)]
+        by_id = {r.row_id: r for r in rows}
+        snapshot_rows, _, _ = review_snapshot(run, review, slot, blind)
+        selected_ids = {r.row_id for r in rows}
+        merged = [m for m in snapshot_rows if m['row_id'] in selected_ids]
+        if classification:
+            merged = [m for m in merged if m['effective_classification'] == classification]
+        if severity:
+            merged = [m for m in merged if m['current_severity'] == severity]
+        if discrepancy:
+            if unresolved:
+                merged = [m for m in merged if any(d['type'] == discrepancy for d in m['current_discrepancies'])]
+            else:
+                merged = [m for m in merged if any(d.type.value == discrepancy for d in by_id[m['row_id']].discrepancies)]
+        if needs_validation is not None:
+            merged = [m for m in merged if m['pending_review'] == needs_validation]
+        if unresolved is not None:
+            merged = [m for m in merged if m['unresolved'] == unresolved]
         if state:
             merged = [m for m in merged if m["state"] == state]
+        merged.sort(key=_queue_sort_key)
         total = len(merged)
         page = merged[offset : offset + limit]
-        by_id = {r.row_id: r for r in rows}
         for m in page:
             r = by_id[m["row_id"]]
             m["a"] = {"item_number": r.source_a.item_number, "description": r.source_a.description, "quantity": str(r.source_a.quantity) if r.source_a.quantity is not None else None, "page": r.source_a.evidence.page, "locator": r.source_a.evidence.locator, "file_name": Path(r.source_a.evidence.file).name} if r.source_a else None
@@ -488,31 +588,33 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return {"doc_id": d.id, "doc_type": d.doc_type.value, "file_name": Path(d.path).name, "header": d.header, "warnings": d.warnings, "pages": _page_count(d.path), "items": [_evidence(i) | {"id": i.id, "is_active": i.is_active} for i in d.items]}
 
     @app.get("/api/runs/{run_id}/documents/{doc_id}/pages/{page_no}")
-    def get_page_image(run_id: str, doc_id: str, page_no: int, highlight: str | None = None, dpi: int = 110):
+    def get_page_image(run_id: str, doc_id: str, page_no: int, highlight: str | None = None, dpi: int = Query(110, ge=36, le=300)):
         run = cache.get(run_id)
         d = _doc(run, doc_id)
         if not d.path.lower().endswith(".pdf"):
             raise HTTPException(404, "document has no page images (spreadsheet source)")
-        pdf = pymupdf.open(d.path)
-        if page_no < 1 or page_no > len(pdf):
-            raise HTTPException(404, "page out of range")
-        page = pdf[page_no - 1]
-        if highlight:
-            r = _find(run, highlight)
-            for item in (r.source_a, r.source_b):
-                if item is not None and item.doc_id == doc_id and item.evidence.bbox is not None and item.evidence.page == page_no:
-                    b = item.evidence.bbox
-                    shape = page.new_shape()
-                    shape.draw_rect(pymupdf.Rect(b.x0 - 2, b.y0 - 2, b.x1 + 2, b.y1 + 2))
-                    shape.finish(color=(0.9, 0.1, 0.1), fill=(1, 0.85, 0.2), fill_opacity=0.25, width=1.2)
-                    shape.commit()
-        png = page.get_pixmap(dpi=dpi).tobytes("png")
-        pdf.close()
+        if not Path(d.path).is_file():
+            raise HTTPException(404, "Source document is unavailable. Upload it again to view its pages.")
+        with pymupdf.open(d.path) as pdf:
+            if page_no < 1 or page_no > len(pdf):
+                raise HTTPException(404, "page out of range")
+            page = pdf[page_no - 1]
+            if highlight:
+                r = _find(run, highlight)
+                for item in (r.source_a, r.source_b):
+                    if item is not None and item.doc_id == doc_id and item.evidence.bbox is not None and item.evidence.page == page_no:
+                        b = item.evidence.bbox
+                        shape = page.new_shape()
+                        shape.draw_rect(pymupdf.Rect(b.x0 - 2, b.y0 - 2, b.x1 + 2, b.y1 + 2) * page.derotation_matrix)
+                        shape.finish(color=(0.9, 0.1, 0.1), fill=(1, 0.85, 0.2), fill_opacity=0.25, width=1.2)
+                        shape.commit()
+            png = page.get_pixmap(dpi=dpi).tobytes("png")
         return Response(content=png, media_type="image/png")
 
     # ---- review -------------------------------------------------------------------------------
     @app.post("/api/runs/{run_id}/decisions")
-    def post_decision(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def post_decision(run_id: str, payload: DecisionInput, session: ReviewSession | None = Depends(_identified)):
+        payload = payload.model_dump()
         run = cache.get(run_id)
         _find(run, payload["row_id"])
         slot, blind = _view_of(session)
@@ -520,14 +622,15 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
             with ws.db.lock:
                 if payload.get('expected_revision') != review.revision(run_id, payload['row_id']):
                     raise HTTPException(409, 'This row changed. Refresh before saving your decision.')
-                review.decide(run_id, payload["row_id"], slot, _actor(session, payload.get("reviewer", "")), payload["decision"], payload.get("comment", ""), payload.get("override_classification"), blind)
+                review.decide(run_id, payload["row_id"], slot, session.reviewer, payload["decision"], payload.get("comment", ""), payload.get("override_classification"), blind)
         except ValueError as e:
             raise HTTPException(400, str(e))
         merged = review.rows_for_viewer(run_id, [_find(run, payload["row_id"])], viewer_slot=slot, blind=blind)[0]
         return {"row_id": payload["row_id"], "state": merged["state"], "decisions": {str(k): v for k, v in merged["decisions"].items()}, "effective_classification": merged["effective_classification"]}
 
     @app.post("/api/runs/{run_id}/finalize")
-    def post_final(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def post_final(run_id: str, payload: ApprovalInput, session: ReviewSession | None = Depends(_identified)):
+        payload = payload.model_dump()
         _find(cache.get(run_id), payload["row_id"])
         slot, blind = _view_of(session)
         if ReviewStore.is_blind_hidden(review.decisions(run_id, payload["row_id"]), slot, blind):
@@ -542,10 +645,11 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     def post_bulk(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
         run = cache.get(run_id)
         slot, _ = _view_of(session)
-        return {"accepted": review.bulk_accept_clean(run_id, run.results, slot, _actor(session, payload.get("reviewer", "")))}
+        return {"accepted": review.bulk_accept_clean(run_id, run.results, slot, session.reviewer)}
 
     @app.post("/api/runs/{run_id}/relationships/from-row")
-    def relationship_from_row(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def relationship_from_row(run_id: str, payload: RowRelationship, session: ReviewSession | None = Depends(_identified)):
+        payload = payload.model_dump()
         run = cache.get(run_id)
         r = _find(run, payload["row_id"])
         if r.source_a is None or r.source_b is None:
@@ -553,8 +657,11 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         canonical = payload.get("canonical") or r.source_b.description
         aliases = payload.get("aliases") or [r.source_a.description]
         anchors = [r.source_a.item_number] if payload.get("anchor") and r.source_a.item_number else []
-        rel = ws.repository.create(canonical=canonical, aliases=aliases, scope=payload.get("scope", "global"), doc_types=payload.get("doc_types", []), item_anchors=anchors, provenance="learned", created_by=_actor(session, payload.get("by", "")), notes=payload.get("notes") or f"Saved from run {run_id} row {r.row_id} ({r.check.value}, {r.sku}); engine said {r.classification.value}")
-        ws.db.audit(_actor(session, payload.get("by", "")), "relationship.learned", f"{rel.id} from {run_id} {r.row_id}")
+        try:
+            rel = ws.repository.create(canonical=canonical, aliases=aliases, scope=payload.get("scope", "global"), doc_types=payload.get("doc_types", []), item_anchors=anchors, provenance="learned", created_by=session.reviewer, notes=payload.get("notes") or f"Saved from run {run_id} row {r.row_id} ({r.check.value}, {r.sku}); engine said {r.classification.value}")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        ws.db.audit(session.reviewer, "relationship.learned", f"{rel.id} from {run_id} {r.row_id}")
         ws.db.conn.commit()
         return rel.model_dump(mode="json")
 
@@ -577,46 +684,59 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return s
 
     @app.post("/api/runs/{run_id}/mining/approve")
-    def approve(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def approve(run_id: str, payload: MiningInput, session: ReviewSession | None = Depends(_identified)):
+        payload = payload.model_dump()
         s = _suggestion(run_id, payload["a_key"], payload["b_key"])
-        return approve_suggestion(ws.repository, s, _actor(session, payload.get("by", "")), payload.get("scope", "global"), bool(payload.get("anchor", False)), payload.get("notes", "")).model_dump(mode="json")
+        try:
+            return approve_suggestion(ws.repository, s, session.reviewer, payload.get("scope", "global"), payload.get("anchor", False), payload.get("notes", "")).model_dump(mode="json")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     @app.post("/api/runs/{run_id}/mining/reject")
-    def reject(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def reject(run_id: str, payload: MiningInput, session: ReviewSession | None = Depends(_identified)):
+        payload = payload.model_dump()
         s = _suggestion(run_id, payload["a_key"], payload["b_key"])
-        reject_suggestion(ws.db, s, _actor(session, payload.get("by", "")), payload.get("note", ""))
+        reject_suggestion(ws.db, s, session.reviewer, payload.get("note", ""))
         return {"rejected": s.pair_key}
 
     # ---- action items ------------------------------------------------------------------------
     @app.post("/api/runs/{run_id}/action-items")
-    def create_action_item(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def create_action_item(run_id: str, payload: ActionInput, session: ReviewSession | None = Depends(_identified)):
+        payload = payload.model_dump()
         run = cache.get(run_id)
         r = _find(run, payload["row_id"])
         try:
-            return asdict(items.create_from_result(run, r, _actor(session, payload.get("reviewer", "")), payload.get("owner", "")))
+            return asdict(items.create_from_result(run, r, session.reviewer, payload.get("owner", "")))
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     @app.get("/api/action-items")
     def list_action_items(status: str | None = None, run_id: str | None = None, session=Depends(_identified)):
         out = items.for_run(run_id) if run_id else items.list(status)
+        if status and run_id:
+            out = [a for a in out if a.status == status]
         return [asdict(a) | {"permission": access.permission(a.run_id, session.reviewer)} for a in out if access.permission(a.run_id, session.reviewer)]
 
     @app.patch("/api/action-items/{ai_id}")
-    def patch_action_item(ai_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def patch_action_item(ai_id: str, payload: ActionUpdate, session: ReviewSession | None = Depends(_identified)):
+        payload = payload.model_dump(exclude_unset=True)
         try:
-            return asdict(items.update(ai_id, _actor(session, payload.get("by", "")), payload.get("status"), payload.get("owner"), payload.get("note", "")))
+            return asdict(items.update(ai_id, session.reviewer, payload.get("status"), payload.get("owner"), payload.get("note", "")))
         except KeyError:
             raise HTTPException(404, "action item not found")
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     @app.post("/api/runs/{run_id}/verify-and-close")
-    def verify_and_close(run_id: str, session=Depends(_identified)):
-        return asdict(items.verify_and_close(cache.get(run_id), by=session.reviewer, allowed_run_ids={run_id}))
+    def verify_and_close(run_id: str, against: str | None = None, session=Depends(_identified)):
+        allowed = {run_id}
+        if against:
+            require_run(against, session.reviewer, edit=True)
+            allowed.add(against)
+        return asdict(items.verify_and_close(cache.get(run_id), by=session.reviewer, allowed_run_ids=allowed))
 
     @app.get("/api/runs/{run_id}/business-case")
-    def get_business_case(run_id: str, baseline_minutes_per_sku: float = 60.0, hourly_rate: float = 37.5, skus_per_project: int = 100, projects_per_year: int = 20, reviewers: int = 2, minutes_per_validation_row: float = 1.5, minutes_per_cleared_row: float = 0.1, target_reduction_pct: float = 50.0):
+    def get_business_case(run_id: str, baseline_minutes_per_sku: float = Query(60.0, gt=0, allow_inf_nan=False), hourly_rate: float = Query(37.5, ge=0, allow_inf_nan=False), skus_per_project: int = Query(100, ge=1), projects_per_year: int = Query(20, ge=0), reviewers: int = Query(2, ge=1), minutes_per_validation_row: float = Query(1.5, ge=0, allow_inf_nan=False), minutes_per_cleared_row: float = Query(0.1, ge=0, allow_inf_nan=False), target_reduction_pct: float = Query(50.0, ge=0, le=100, allow_inf_nan=False)):
         return business_case(cache.get(run_id), BusinessAssumptions(baseline_minutes_per_sku, hourly_rate, skus_per_project, projects_per_year, reviewers, minutes_per_validation_row, minutes_per_cleared_row, target_reduction_pct), timing=review.timing(run_id)).to_dict()
 
     # ---- exports -----------------------------------------------------------------------------
@@ -648,7 +768,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     def _bundle(run: Run) -> ReviewBundle:
         rid = run.metadata.run_id
         decisions, finals = review.all_decisions(rid), review.finals(rid)
-        states = {r.row_id: ReviewStore.state_of(decisions.get(r.row_id, {}), finals.get(r.row_id)) for r in run.results}
+        states = {r.row_id: review.state_of(decisions.get(r.row_id, {}), finals.get(r.row_id)) for r in run.results}
         return ReviewBundle(decisions=decisions, finals=finals, states=states, action_items=items.for_run(rid))
 
     @app.get("/api/runs/{run_id}/certificate.pdf")
@@ -670,7 +790,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return diff_runs(before, after).to_dict()
 
     @app.post("/api/runs/{run_id}/decisions/import")
-    def import_from_excel(run_id: str, file: UploadFile = File(...), dry_run: bool = Form(False), force: bool = Form(False), session: ReviewSession | None = Depends(_identified)):
+    async def import_from_excel(run_id: str, file: UploadFile = File(...), dry_run: bool = Form(False), force: bool = Form(False), session: ReviewSession | None = Depends(_identified)):
         """Optional: apply the signed-in reviewer's decisions from an exported workbook. Slot and name come from the session."""
         if session is None:
             raise HTTPException(401, SIGN_IN_HINT)
@@ -678,11 +798,20 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         folder = ws.runs_dir / run_id / "imports"
         folder.mkdir(parents=True, exist_ok=True)
         dest = folder / f"{uuid.uuid4().hex[:8]}-{re.sub(r'[^A-Za-z0-9._-]+', '_', Path(file.filename or 'decisions.xlsx').name)}"
-        dest.write_bytes(file.file.read())
         try:
-            return import_decisions(ws, run, dest, session.slot, session.reviewer, dry_run=dry_run, force=force, review_store=review).to_dict()
+            await _save_import(file, dest)
+            result = await run_in_threadpool(import_decisions, ws, run, dest, session.slot, session.reviewer, dry_run=dry_run, force=force, review_store=review)
+            return result.to_dict()
         except ValueError as e:
+            dest.unlink(missing_ok=True)
             raise HTTPException(400, str(e))
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise
+        finally:
+            if dry_run:
+                dest.unlink(missing_ok=True)
+            await file.close()
 
     # ---- terminology --------------------------------------------------------------------------
     def _rel(r, usage):
@@ -699,18 +828,25 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return FileResponse(path, media_type=XLSX, filename="relationships.xlsx")
 
     @app.post("/api/terminology/import")
-    async def terminology_import(file: UploadFile = File(...), by: str = Form("import")):
-        data = await file.read()
+    async def terminology_import(file: UploadFile = File(...), by: str = Form("import"), session=Depends(_identified)):
         tmp = ws.path / "uploads" / f"import-{uuid.uuid4().hex[:8]}-{Path(file.filename or 'rels.xlsx').name}"
-        tmp.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(data)
-        result = import_csv(ws.repository, tmp, by) if tmp.suffix.lower() == ".csv" else import_xlsx(ws.repository, tmp, by)
+        try:
+            await _save_import(file, tmp)
+            result = await run_in_threadpool(import_csv if tmp.suffix.lower() == ".csv" else import_xlsx, ws.repository, tmp, session.reviewer)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Could not read the terminology file ({type(e).__name__}). Use a Kaizen CSV or XLSX export.")
+        finally:
+            tmp.unlink(missing_ok=True)
+            await file.close()
         return {"summary": result.summary(), "created": result.created, "updated": result.updated, "unchanged": result.unchanged, "errors": result.errors}
 
     @app.post("/api/terminology")
-    def create_relationship(payload: dict = Body(...)):
+    def create_relationship(payload: RelationshipInput, session=Depends(_identified)):
+        payload = payload.model_dump()
         try:
-            rel = ws.repository.create(canonical=payload["canonical"], aliases=payload.get("aliases", []), scope=payload.get("scope", "global"), doc_types=payload.get("doc_types", []), item_anchors=payload.get("item_anchors", []), provenance=payload.get("provenance", "manual"), created_by=payload.get("by", "ui"), notes=payload.get("notes", ""))
+            rel = ws.repository.create(canonical=payload["canonical"], aliases=payload.get("aliases", []), scope=payload.get("scope", "global"), doc_types=payload.get("doc_types", []), item_anchors=payload.get("item_anchors", []), provenance=payload.get("provenance", "manual"), created_by=session.reviewer, notes=payload.get("notes", ""))
         except ValueError as e:
             raise HTTPException(400, str(e))
         return rel.model_dump(mode="json")
@@ -723,27 +859,34 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return _rel(rel, ws.repository.usage_counts())
 
     @app.put("/api/terminology/{rel_id}")
-    def update_relationship(rel_id: str, payload: dict = Body(...)):
+    def update_relationship(rel_id: str, payload: RelationshipUpdate, session=Depends(_identified)):
+        payload = payload.model_dump(exclude_unset=True)
         fields = {k: payload[k] for k in ("canonical", "aliases", "scope", "doc_types", "item_anchors", "notes") if k in payload}
         try:
-            return ws.repository.update(rel_id, payload.get("by", "ui"), payload.get("note", ""), **fields).model_dump(mode="json")
+            return ws.repository.update(rel_id, session.reviewer, payload.get("note", ""), **fields).model_dump(mode="json")
         except KeyError:
             raise HTTPException(404, "relationship not found")
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     @app.post("/api/terminology/{rel_id}/deactivate")
-    def deactivate_relationship(rel_id: str, payload: dict = Body(default={})):
-        return ws.repository.deactivate(rel_id, payload.get("by", "ui"), payload.get("note", "")).model_dump(mode="json")
+    def deactivate_relationship(rel_id: str, payload: ChangeNote = Body(default=ChangeNote()), session=Depends(_identified)):
+        try:
+            return ws.repository.deactivate(rel_id, session.reviewer, payload.note).model_dump(mode="json")
+        except KeyError:
+            raise HTTPException(404, "relationship not found")
 
     @app.post("/api/terminology/{rel_id}/activate")
-    def activate_relationship(rel_id: str, payload: dict = Body(default={})):
-        return ws.repository.activate(rel_id, payload.get("by", "ui"), payload.get("note", "")).model_dump(mode="json")
+    def activate_relationship(rel_id: str, payload: ChangeNote = Body(default=ChangeNote()), session=Depends(_identified)):
+        try:
+            return ws.repository.activate(rel_id, session.reviewer, payload.note).model_dump(mode="json")
+        except KeyError:
+            raise HTTPException(404, "relationship not found")
 
     @app.delete("/api/terminology/{rel_id}")
-    def delete_relationship(rel_id: str, by: str = "ui", note: str = ""):
+    def delete_relationship(rel_id: str, by: str = "ui", note: str = "", session=Depends(_identified)):
         try:
-            ws.repository.delete(rel_id, by, note)
+            ws.repository.delete(rel_id, session.reviewer, note)
         except KeyError:
             raise HTTPException(404, "relationship not found")
         return {"deleted": rel_id}
@@ -753,7 +896,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return [{"version": h.version, "change_type": h.change_type, "changed_by": h.changed_by, "changed_at": h.changed_at.isoformat(), "change_note": h.change_note, "payload": h.payload.model_dump(mode="json")} for h in ws.repository.history(rel_id)]
 
     @app.get("/api/audit")
-    def audit(limit: int = 200, session: ReviewSession | None = Depends(_identified)):
+    def audit(limit: int = Query(200, ge=1, le=1000), session: ReviewSession | None = Depends(_identified)):
         _refuse_if_blind(session)
         return [dict(r) for r in ws.db.conn.execute("SELECT * FROM audit ORDER BY seq DESC LIMIT ?", (limit,))]
 

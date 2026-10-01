@@ -59,7 +59,10 @@ def _store(ctx: typer.Context, path: Path | None) -> RelationshipStore:
 def _thresholds(potential: float | None, floor: float | None, delta: float | None) -> Thresholds:
     t = Thresholds()
     updates = {k: v for k, v in (("potential", potential), ("floor", floor), ("ambiguity_delta", delta)) if v is not None}
-    return t.model_copy(update=updates) if updates else t
+    try:
+        return Thresholds.model_validate({**t.model_dump(), **updates})
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
 
 
 def _print_summary(run: Run) -> None:

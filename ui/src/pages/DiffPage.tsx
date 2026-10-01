@@ -1,13 +1,14 @@
 // Run-to-run diff: after corrected documents come back, show only what moved.
 import { ArrowRight, CheckCircle, GitDiff } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { ClassificationBadge } from "../components/Badges";
 import { ErrorBox, Notice } from "../components/Feedback";
 import { Stat } from "../components/Stat";
-import { Card, CardHead, EmptyState, Field, LinkButton, PageHeader, TableSkeleton } from "../components/ui";
+import { Button, Card, CardHead, EmptyState, Field, LinkButton, PageHeader, TableSkeleton } from "../components/ui";
 import { enc, shortSha } from "../lib/format";
-import { useAsync } from "../lib/useAsync";
+import { errorMessage, useAsync } from "../lib/useAsync";
 import type { DiffStatus, RunDiffRow } from "../types";
 
 const STATUS_LABEL: Record<DiffStatus, string> = {
@@ -49,6 +50,19 @@ export default function DiffPage() {
   const diff = useAsync(() => (against ? api.getDiff(runId, against) : Promise.resolve(null)), [runId, against]);
   const others = (runs.data ?? []).filter((r) => r.run_id !== runId);
   const dd = diff.data;
+  const [verifying, setVerifying] = useState(false);
+  const [verification, setVerification] = useState<string | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  useEffect(() => { setVerification(null); setVerifyError(null); }, [runId, against]);
+  const canVerify = [runId, against].every(id => runs.data?.some(run => run.run_id === id && run.permission !== "view"));
+  const verifyEarlier = async () => {
+    setVerifying(true); setVerifyError(null);
+    try {
+      const outcome = await api.verifyAndClose(runId, against);
+      setVerification(`${outcome.resolved.length} action items resolved · ${outcome.still_open.length} still open · ${outcome.not_covered.length} not covered by this run`);
+    } catch (error) { setVerifyError(errorMessage(error)); }
+    finally { setVerifying(false); }
+  };
   const listedRows = dd ? dd.rows.filter((r) => LISTED.includes(r.status)).length : 0;
 
   return (
@@ -75,7 +89,7 @@ export default function DiffPage() {
               id="diff-against"
               className="input mono w-full"
               value={against}
-              disabled={others.length === 0}
+              disabled={others.length === 0 || verifying}
               onChange={(e) => {
                 const n = new URLSearchParams(sp);
                 if (e.target.value) n.set("against", e.target.value);
@@ -96,8 +110,12 @@ export default function DiffPage() {
 
       <div className="space-y-5 stagger">
         <Notice>
-          <b>Resolved</b>: the discrepancy is no longer reported. <b>Gone</b>: the comparison was removed. To close related action items, use “Verify and close” in the run overview.
+          <b>Resolved</b>: the later comparison has no discrepancy and needs no validation. <b>Gone</b>: the comparison was removed. With edit access to both runs, verify action items from the earlier run against these results.
         </Notice>
+
+        {dd && canVerify && <Button loading={verifying} disabled={verifying} onClick={verifyEarlier}>Verify action items from earlier run</Button>}
+        {verification && <Notice>{verification}</Notice>}
+        {verifyError && <ErrorBox error={verifyError} />}
 
         {runs.error && <ErrorBox error={runs.error} onRetry={runs.reload} />}
         {diff.error && <ErrorBox error={diff.error} onRetry={diff.reload} />}

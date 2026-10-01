@@ -77,8 +77,8 @@ class ActionItemStore:
         if disc is None:
             raise ValueError("the result has no discrepancy to act on")
         now = _now()
-        ai = ActionItem(self.next_id(), run.metadata.run_id, result.row_id, result.sku, result.check.value, disc.type.value, disc.severity.value, disc.detail, disc.recommended_action, owner, "OPEN", reviewer, now, now, comparison_key=comparison_key(result))
-        with self.db.lock:
+        with self.db.transaction():
+            ai = ActionItem(self.next_id(), run.metadata.run_id, result.row_id, result.sku, result.check.value, disc.type.value, disc.severity.value, disc.detail, disc.recommended_action, owner, "OPEN", reviewer, now, now, comparison_key=comparison_key(result))
             return self._insert(ai, reviewer)
 
     def _insert(self, ai: ActionItem, reviewer: str) -> ActionItem:
@@ -107,13 +107,15 @@ class ActionItemStore:
     def update(self, ai_id: str, by: str, status: str | None = None, owner: str | None = None, note: str = "") -> ActionItem:
         if status is not None and status not in STATUSES:
             raise ValueError(f"status must be one of {STATUSES}")
-        current = self.get(ai_id)
-        if current is None:
-            raise KeyError(ai_id)
-        new_status = status or current.status
-        new_owner = owner if owner is not None else current.owner
-        with self.db.lock:
-            self.conn.execute("UPDATE action_items SET status = ?, owner = ?, updated_at = ? WHERE id = ?", (new_status, new_owner, _now(), ai_id))
+        with self.db.transaction():
+            current = self.get(ai_id)
+            if current is None:
+                raise KeyError(ai_id)
+            new_status = status or current.status
+            new_owner = owner if owner is not None else current.owner
+            resolved_at = current.resolved_at if new_status in ('RESOLVED', 'CLOSED') else ''
+            resolved_in_run = current.resolved_in_run if new_status in ('RESOLVED', 'CLOSED') else ''
+            self.conn.execute("UPDATE action_items SET status = ?, owner = ?, updated_at = ?, resolved_at = ?, resolved_in_run = ? WHERE id = ?", (new_status, new_owner, _now(), resolved_at, resolved_in_run, ai_id))
             self.db.audit(by, "action_item.updated", f"{ai_id}: status {new_status}, owner {new_owner} {note}".strip())
             self.conn.commit()
         return self.get(ai_id)
@@ -126,21 +128,21 @@ class ActionItemStore:
         open_keys: dict[str, bool] = {}
         for r in run.results:
             k = comparison_key(r)
-            open_keys[k] = open_keys.get(k, False) or any(d.severity is not Severity.INFO for d in r.discrepancies)
-        for ai in self.list():
-            if allowed_run_ids is not None and ai.run_id not in allowed_run_ids:
-                continue
-            if ai.status not in ("OPEN", "IN_PROGRESS"):
-                continue
-            if ai.sku not in covered:
-                outcome.not_covered.append(ai.id)
-                continue
-            if open_keys.get(ai.comparison_key, False):
-                outcome.still_open.append(ai.id)
-                continue
-            now = _now()
-            self.conn.execute("UPDATE action_items SET status = 'RESOLVED', resolved_in_run = ?, resolved_at = ?, updated_at = ? WHERE id = ?", (run.metadata.run_id, now, now, ai.id))
-            self.db.audit(by, "action_item.resolved", f"{ai.id} resolved by run {run.metadata.run_id} (comparison {ai.comparison_key} no longer shows a discrepancy)")
-            outcome.resolved.append(ai.id)
-        self.conn.commit()
+            open_keys[k] = open_keys.get(k, False) or r.requires_validation or any(d.severity is not Severity.INFO for d in r.discrepancies)
+        with self.db.transaction():
+            for ai in self.list():
+                if allowed_run_ids is not None and ai.run_id not in allowed_run_ids:
+                    continue
+                if ai.status not in ("OPEN", "IN_PROGRESS"):
+                    continue
+                if ai.sku not in covered or ai.comparison_key not in open_keys:
+                    outcome.not_covered.append(ai.id)
+                    continue
+                if open_keys[ai.comparison_key]:
+                    outcome.still_open.append(ai.id)
+                    continue
+                now = _now()
+                self.conn.execute("UPDATE action_items SET status = 'RESOLVED', resolved_in_run = ?, resolved_at = ?, updated_at = ? WHERE id = ?", (run.metadata.run_id, now, now, ai.id))
+                self.db.audit(by, "action_item.resolved", f"{ai.id} resolved by run {run.metadata.run_id} (comparison {ai.comparison_key} no longer shows a discrepancy)")
+                outcome.resolved.append(ai.id)
         return outcome

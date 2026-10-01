@@ -1,34 +1,30 @@
 import { ArrowRight, Certificate, CheckCircle, FileXls, GitDiff, ShieldWarning, Warning } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { RunSharing } from "../components/RunSharing";
 import { api } from "../api";
 import { Badge, ClassificationBadge, SeverityBadge, StateBadge } from "../components/Badges";
-import { ErrorBox, Loading } from "../components/Feedback";
+import { ErrorBox } from "../components/Feedback";
 import { Bar, CLASS_COLORS, Stat } from "../components/Stat";
 import { AnchorButton, Button, Card, CardHead, LinkButton, PageHeader, Skeleton } from "../components/ui";
 import { enc, fmtBytes, fmtDate, issueLabel, shortSha } from "../lib/format";
-import { useReviewer } from "../lib/reviewer";
+import { useDataRefresh } from "../lib/dataRefresh";
 import { useToast } from "../lib/toast";
 import { errorMessage, useAsync } from "../lib/useAsync";
-import { CHECK_TYPES, CLASSIFICATIONS, DOC_TYPES, REVIEW_STATES, type Severity, type VerifyOutcome } from "../types";
+import { CHECK_TYPES, CLASSIFICATIONS, DOC_TYPES, REVIEW_STATES, type VerifyOutcome } from "../types";
 
-const SEV_RANK: Record<Severity, number> = { BLOCKER: 0, MAJOR: 1, MINOR: 2, INFO: 3 };
 const CHECK_LABEL: Record<string, string> = { BOM_LABEL: "BOM to label", BOM_DRAWING: "BOM to drawing", LABEL_DRAWING: "Label to drawing", PCO_BOM: "PCO to BOM", LABEL_REVISION: "Label revision" };
 
 export default function DashboardPage() {
   const { runId = "" } = useParams();
-  const { viewerParams } = useReviewer();
   const toast = useToast();
   const run = useAsync(() => api.getRun(runId), [runId]);
-  // Rows needing validation, to list unresolved discrepancies by type (cheap: a few hundred rows).
-  const nv = useAsync(
-    () => api.getResults(runId, { needs_validation: true, limit: 5000, viewer: viewerParams.viewer, blind: viewerParams.blind || undefined }),
-    [runId, viewerParams.viewer, viewerParams.blind],
-  );
+  useDataRefresh(run.reload, runId);
   const [verify, setVerify] = useState<VerifyOutcome | null>(null);
   const [verifyErr, setVerifyErr] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const verifyRequest = useRef(0);
+  useEffect(() => { verifyRequest.current += 1; setVerify(null); setVerifyErr(null); setVerifying(false); }, [runId]);
 
   if (run.error) return <ErrorBox error={run.error} onRetry={run.reload} />;
   if (!run.data) return <DashboardSkeleton />;
@@ -36,48 +32,45 @@ export default function DashboardPage() {
   const base = `/runs/${enc(runId)}`;
   const queue = (params: Record<string, string>) => `${base}/review?${new URLSearchParams(params).toString()}`;
 
-  const rows = nv.data?.rows ?? [];
-  const unresolved = rows.filter((x) => x.discrepancies.length > 0 && x.state !== "FINALIZED");
-  const byType = new Map<string, { count: number; top: Severity }>();
-  for (const x of unresolved) {
-    for (const d of x.discrepancies) {
-      const cur = byType.get(d.type);
-      if (!cur) byType.set(d.type, { count: 1, top: d.severity });
-      else {
-        cur.count += 1;
-        if (SEV_RANK[d.severity] < SEV_RANK[cur.top]) cur.top = d.severity;
-      }
-    }
-  }
-  const typeRows = [...byType.entries()].sort((a, b) => SEV_RANK[a[1].top] - SEV_RANK[b[1].top] || b[1].count - a[1].count);
+  const progress = r.review_progress;
+  const typeRows = progress.discrepancies;
   const coverageIssues = r.coverage.filter((c) => c.status !== "OK");
   const reviewable = r.reviewable_rows ?? r.rows;
-  const headerNeeds = r.header_rows_needing_validation ?? 0;
-  const flagged = nv.data?.total ?? r.needs_validation + headerNeeds;
-  const disagreements = r.state_counts.DISAGREEMENT ?? 0;
+  const flagged = progress.pending;
   const clearedPct = reviewable ? Math.round((100 * r.auto_cleared) / reviewable) : 0;
-  const verdict = r.blockers > 0 ? { tone: "bad" as const, label: "Blocked", icon: <ShieldWarning size={14} weight="fill" /> } : r.needs_validation > 0 ? { tone: "warn" as const, label: "Needs review", icon: <Warning size={14} weight="fill" /> } : { tone: "ok" as const, label: "Cleared", icon: <CheckCircle size={14} weight="fill" /> };
+  const verdict = progress.blockers > 0 || coverageIssues.some(c => c.status.startsWith("MISSING"))
+    ? { tone: "bad" as const, label: "Blocked", icon: <ShieldWarning size={14} weight="fill" /> }
+    : r.rows === 0
+    ? { tone: "warn" as const, label: "Not checked", icon: <Warning size={14} weight="fill" /> }
+    : flagged > 0 || r.unrecognised_files.length > 0
+    ? { tone: "warn" as const, label: "Needs review", icon: <Warning size={14} weight="fill" /> }
+    : progress.unresolved_rows > 0
+    ? { tone: "warn" as const, label: "Discrepancies confirmed", icon: <Warning size={14} weight="fill" /> }
+    : { tone: "ok" as const, label: "Cleared", icon: <CheckCircle size={14} weight="fill" /> };
 
   const doVerify = async () => {
+    const requestId = ++verifyRequest.current;
     setVerifying(true);
     setVerifyErr(null);
     try {
       const out = await api.verifyAndClose(runId);
+      if (requestId !== verifyRequest.current) return;
       setVerify(out);
       toast({ tone: out.resolved.length ? "ok" : "info", title: `${out.resolved.length} action item${out.resolved.length === 1 ? "" : "s"} resolved`, description: `${out.still_open.length} still open · ${out.not_covered.length} not covered by this run` });
     } catch (e) {
-      setVerifyErr(errorMessage(e));
+      if (requestId === verifyRequest.current) setVerifyErr(errorMessage(e));
     } finally {
-      setVerifying(false);
+      if (requestId === verifyRequest.current) setVerifying(false);
     }
   };
 
   return (
     <div>
       <PageHeader
+        className="overview-heading"
         title={
           <>
-            <span>{r.name || "Overview"}</span>
+            <span>Overview</span>
             <Badge tone={verdict.tone} dot={false} size="md">
               {verdict.icon}
               {verdict.label}
@@ -86,6 +79,7 @@ export default function DashboardPage() {
         }
         meta={
           <>
+            {r.name && <span>{r.name}</span>}
             <span>{fmtDate(r.timestamp)}</span>
             <span>{r.skus} SKUs</span>
             <span>{r.documents} documents</span>
@@ -95,11 +89,11 @@ export default function DashboardPage() {
           </>
         }
         description="Results and review status for this run."
+        actions={<div className="overview-review-action">
+          <LinkButton variant="primary" to={queue({ nv: "1" })} iconRight={<ArrowRight size={16} />}>Review queue <span className="queue-count">{flagged}</span></LinkButton>
+          <span>{flagged ? "Awaiting review or approval" : "No pending reviews"}</span>
+        </div>}
       />
-      <section className="review-next" aria-label="Next step">
-        <div><h2>{flagged ? "Comparisons needing review" : "Results"}</h2><p>{flagged ? `${flagged} comparisons were flagged by the engine. Open the queue to see their review status and supporting evidence.` : "No comparisons were flagged by the engine. You can still inspect the results and evidence."}</p></div>
-        <LinkButton variant="primary" to={queue({})} iconRight={<ArrowRight size={16} />}>{r.permission === "view" ? "View comparisons" : "Review comparisons"}</LinkButton>
-      </section>
       <details className="run-management">
         <summary>Run settings and exports</summary>
         <RunSharing key={runId} run={r} onChanged={run.reload} />
@@ -136,7 +130,7 @@ export default function DashboardPage() {
 
         {/* ---- the picture: what the engine cleared, what needs a person */}
         <Card>
-          <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-line">
+          <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-line">
             <div className="p-5">
               <div className="text-sm font-medium text-ink-2">Auto-cleared</div>
               <div className="flex items-baseline gap-3 mt-1">
@@ -144,30 +138,30 @@ export default function DashboardPage() {
                 <span className="text-sm text-ink-3">{clearedPct}% of {reviewable} reviewable</span>
               </div>
               <p className="text-sm text-ink-3 mt-2">
-                Matches with no reported discrepancy. <Link to={queue({ nv: "0", classification: "EXACT" })}>View exact matches</Link>.
+                Original automated results. <Link className="whitespace-nowrap" to={queue({ nv: "0", engine_classification: "EXACT" })}>View exact matches</Link>.
               </p>
             </div>
             <div className="p-5">
               <div className="text-sm font-medium text-ink-2">Needs review</div>
               <div className="flex items-baseline gap-3 mt-1">
-                <span className="num text-4xl font-semibold text-bad-strong">{r.needs_validation}</span>
-                <span className="text-sm text-ink-3">{reviewable ? Math.round((100 * r.needs_validation) / reviewable) : 0}% of {reviewable} reviewable</span>
+                <span className="num text-4xl font-semibold text-bad-strong" data-testid="pending-reviews">{flagged}</span>
               </div>
+              <p className="text-sm text-ink-3 mt-2">{progress.awaiting_review} not reviewed · {progress.awaiting_approval} awaiting approval. <Link className="whitespace-nowrap" to={queue({ nv: "1" })}>Open review queue</Link>.</p>
               <div className="flex flex-wrap gap-1.5 mt-2">
-                <Badge tone={r.blockers ? "bad" : "neutral"}>
-                  {r.blockers} blocker{r.blockers === 1 ? "" : "s"}
+                <Badge tone={progress.blockers ? "bad" : "neutral"}>
+                  {progress.blockers} blocker{progress.blockers === 1 ? "" : "s"}
                 </Badge>
-                <Badge tone={r.low_confidence_rows ? "warn" : "neutral"}>
-                  {r.low_confidence_rows} low-confidence
+                <Badge tone={progress.low_confidence_rows ? "warn" : "neutral"}>
+                  {progress.low_confidence_rows} low-confidence
                 </Badge>
-                {disagreements > 0 && <Badge tone="bad">{disagreements} disagreement{disagreements === 1 ? "" : "s"}</Badge>}
-                {headerNeeds > 0 && <Badge tone="neutral">{headerNeeds} header or coverage rows</Badge>}
+                {progress.needs_information > 0 && <Badge tone="warn">{progress.needs_information} need more information</Badge>}
               </div>
             </div>
-          </div>
-          <div className="px-5 pb-5 pt-1">
-            <Bar key={r.run_id} animate height={12} segments={[{ label: "Auto-cleared", value: r.auto_cleared, color: CLASS_COLORS.EXACT }, { label: "Needs review", value: r.needs_validation, color: CLASS_COLORS.MISMATCH }]} />
-            {(r.exempt_rows ?? 0) > 0 && <p className="text-xs text-ink-3 mt-2">Excludes {r.exempt_rows} exempt rows, such as labels and process steps. These remain in the queue and exported workbook.</p>}
+            <div className="p-5">
+              <div className="text-sm font-medium text-ink-2">Approved</div>
+              <div className="num text-4xl font-semibold text-ok-strong mt-1" data-testid="approved-reviews">{progress.approved}</div>
+              <p className="text-sm text-ink-3 mt-2">{progress.confirmed_discrepancies} with confirmed discrepancies. <Link to={queue({ nv: "0", state: "FINALIZED" })}>View approved rows</Link>.</p>
+            </div>
           </div>
         </Card>
 
@@ -175,25 +169,16 @@ export default function DashboardPage() {
           <Stat label="SKUs" value={r.skus} />
           <Stat label="Documents" value={r.documents} sub={DOC_TYPES.map((t) => `${t} ${r.documents_by_type[t] ?? 0}`).join(" · ")} />
           <Stat label="Comparisons" value={r.rows} sub={r.reviewable_rows !== undefined ? `${r.reviewable_rows} reviewable · ${r.exempt_rows ?? 0} exempt` : undefined} />
-          <Stat label="Blockers" value={r.blockers} tone={r.blockers ? "bad" : "good"} />
+          <Stat label="Blockers" value={progress.blockers} tone={progress.blockers ? "bad" : "good"} />
           <Stat label="Coverage issues" value={coverageIssues.length} tone={coverageIssues.length ? "bad" : "good"} sub="Missing or incomplete SKU sets" />
           <Stat label="Unrecognised files" value={r.unrecognised_files.length} tone={r.unrecognised_files.length ? "warn" : "neutral"} />
         </div>
 
         <div className="grid xl:grid-cols-2 gap-5">
           <Card>
-            <CardHead title="Open discrepancies" count={nv.loading ? "Loading…" : `${unresolved.length} comparisons awaiting approval`} />
-            {nv.error && (
-              <div className="p-4">
-                <ErrorBox error={nv.error} onRetry={nv.reload} />
-              </div>
-            )}
-            {nv.loading && !nv.data && (
-              <div className="p-4">
-                <Loading lines={4} />
-              </div>
-            )}
-            {typeRows.length === 0 && !nv.loading && !nv.error && <div className="p-5 text-sm text-ink-3">No open discrepancies.</div>}
+            <CardHead title="Open discrepancies" count={`${progress.unresolved_rows} comparisons`} />
+            {progress.confirmed_discrepancies > 0 && <p className="px-5 pt-3 text-sm text-ink-3">Includes {progress.confirmed_discrepancies} approved rows with confirmed findings that still need correction.</p>}
+            {typeRows.length === 0 && <div className="p-5 text-sm text-ink-3">No open discrepancies.</div>}
             {typeRows.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="tbl">
@@ -206,15 +191,15 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {typeRows.map(([t, v]) => (
-                      <tr key={t}>
+                    {typeRows.map((v) => (
+                      <tr key={v.type}>
                         <td>
-                          <SeverityBadge value={v.top} />
+                          <SeverityBadge value={v.severity} />
                         </td>
-                        <td title={t}>{issueLabel(t)}</td>
+                        <td title={v.type}>{issueLabel(v.type)}</td>
                         <td className="text-right num font-medium">{v.count}</td>
                         <td className="text-right">
-                          <Link to={queue({ discrepancy: t, nv: "0" })}>open</Link>
+                          <Link to={queue({ discrepancy: v.type, unresolved: "1", nv: "0" })}>open</Link>
                         </td>
                       </tr>
                     ))}
@@ -239,12 +224,13 @@ export default function DashboardPage() {
 
           <div className="space-y-5">
             <Card>
-              <CardHead title="Automated results" count={`${r.rows} comparisons`} />
+              <CardHead title="Automated results" count={`${reviewable} reviewable comparisons`} />
               <div className="p-5">
+                <p className="text-xs text-ink-3 mb-3">Original engine recommendations, recorded before review. Approvals appear in the review status above.</p>
                 <Bar segments={CLASSIFICATIONS.map((c) => ({ label: c, value: r.counts[c] ?? 0, color: CLASS_COLORS[c] }))} />
                 <div className="flex flex-wrap gap-1.5 mt-3">
                   {CLASSIFICATIONS.map((c) => (
-                    <Link key={c} className="no-underline" to={queue({ classification: c, nv: "0" })}>
+                    <Link key={c} className="no-underline" to={queue({ engine_classification: c, nv: "0" })}>
                       <ClassificationBadge value={c} />
                     </Link>
                   ))}
