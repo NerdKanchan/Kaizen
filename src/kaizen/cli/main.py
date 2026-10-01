@@ -15,7 +15,8 @@ from kaizen.ingest.detect import parse_document
 from kaizen.models import Classification, Run, Thresholds
 from kaizen.pipeline import discover_files, load_run, run_folder, save_run
 from kaizen.reporting.excel import write_report
-from kaizen.terminology.exchange import export_csv, export_xlsx, import_csv, import_xlsx
+from kaizen.terminology.exchange import export_csv, export_xlsx
+from kaizen.terminology.source_import import import_source, inspect_source
 from kaizen.terminology.store import RelationshipStore
 from kaizen.workspace import Workspace
 
@@ -360,13 +361,45 @@ def terminology_export(ctx: typer.Context, path: Path) -> None:
 
 
 @terminology_app.command("import")
-def terminology_import(ctx: typer.Context, path: Path, by: str = typer.Option("import", "--by")) -> None:
-    """Import relationships from .xlsx or .csv (creates or versions)."""
+def terminology_import(
+    ctx: typer.Context, path: Path, by: str = typer.Option("import", "--by"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without saving relationships."),
+    sheet: Optional[str] = typer.Option(None, "--sheet"), header_row: int = typer.Option(1, "--header-row"),
+    canonical_column: Optional[str] = typer.Option(None, "--canonical-column"),
+    alias_column: list[str] = typer.Option([], "--alias-column", help="Repeat for each equivalent wording column."),
+    anchor_column: list[str] = typer.Option([], "--anchor-column", help="Repeat for each BOM item-number column."),
+    scope_column: Optional[str] = typer.Option(None, "--scope-column"),
+    default_scope: str = typer.Option("global", "--default-scope"),
+) -> None:
+    """Import an authorized readable relationship export; preview first with --dry-run."""
     repo = _ws(ctx).repository
-    result = import_csv(repo, path, imported_by=by) if path.suffix.lower() == ".csv" else import_xlsx(repo, path, imported_by=by)
-    typer.echo(f"Import {path.name}: {result.summary()}")
+    mapping = None
+    if canonical_column or alias_column or anchor_column or scope_column:
+        mapping = {"Canonical": [canonical_column or "Canonical"], "Aliases": alias_column, "Item Anchors": anchor_column}
+        if scope_column:
+            mapping["Scope"] = [scope_column]
+    try:
+        result = import_source(repo, path, by, column_map=mapping, sheet=sheet, header_row=header_row, default_scope=default_scope, dry_run=dry_run)
+    except (ValueError, OSError) as e:
+        raise typer.BadParameter(str(e)) from e
+    typer.echo(f"{path.name}: {result.summary()}")
+    for row in result.rows:
+        typer.echo(f"  row {row['row']} {row['action']} {row['id']} [{row['scope']}]: {row['canonical']} = {' = '.join(row['aliases'])}")
     for e in result.errors:
         typer.echo(f"  error: {e}")
+    if result.errors:
+        raise typer.Exit(code=2)
+
+
+@terminology_app.command("inspect")
+def terminology_inspect(path: Path, sheet: Optional[str] = typer.Option(None, "--sheet"), header_row: int = typer.Option(1, "--header-row")) -> None:
+    """Show sheets, column names and sample rows from a readable relationship export."""
+    import json
+
+    try:
+        typer.echo(json.dumps(inspect_source(path, sheet, header_row), indent=2, ensure_ascii=False))
+    except (ValueError, OSError) as e:
+        raise typer.BadParameter(str(e)) from e
 
 
 # ---- runs -------------------------------------------------------------------------------------------------

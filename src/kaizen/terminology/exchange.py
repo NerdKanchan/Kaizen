@@ -5,11 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
-from pydantic import ValidationError
 
-from kaizen.models import DocType, Relationship
+from kaizen.models import Relationship
 from kaizen.terminology.repository import TerminologyRepository
 
 COLUMNS = ["ID", "Canonical", "Aliases", "Scope", "Doc Types", "Item Anchors", "Provenance", "Created By", "Active", "Notes", "Version", "Created At", "Updated At"]
@@ -42,10 +41,6 @@ def _split_aliases(v: Any) -> list[str]:
     if v is None:
         return []
     return [x.strip() for x in str(v).replace("\n", ";").split(";") if x.strip()]
-
-
-def _truthy(v: Any) -> bool:
-    return str(v).strip().upper() in ("Y", "YES", "TRUE", "1", "ACTIVE")
 
 
 def export_xlsx(repo: TerminologyRepository, path: Path | str) -> Path:
@@ -89,63 +84,13 @@ def export_csv(repo: TerminologyRepository, path: Path | str) -> Path:
     return path
 
 
-def _apply_rows(repo: TerminologyRepository, rows: list[dict[str, Any]], imported_by: str, source: str) -> ImportResult:
-    result = ImportResult()
-    for n, row in enumerate(rows, start=2):
-        canonical = str(row.get("Canonical") or "").strip()
-        if not canonical:
-            continue
-        rel_id = (str(row.get("ID")).strip() if row.get("ID") not in (None, "") else "")
-        fields = {
-            "canonical": canonical,
-            "aliases": _split_aliases(row.get("Aliases")),
-            "scope": (str(row.get("Scope") or "global")).strip() or "global",
-            "doc_types": [d.upper() for d in _split(row.get("Doc Types"))],
-            "item_anchors": _split(row.get("Item Anchors")),
-            "notes": str(row.get("Notes") or ""),
-            "active": _truthy(row.get("Active")) if row.get("Active") not in (None, "") else True,
-        }
-        try:
-            [DocType(d) for d in fields["doc_types"]]
-            Relationship(id="REL-000", **fields)  # validates scope and shapes
-        except (ValidationError, ValueError) as e:
-            msg = str(e).splitlines()
-            result.errors.append(f"row {n}: " + next((m.strip() for m in msg if "scope" in m.lower() or "doc" in m.lower() or "Value error" in m), msg[0]))
-            continue
-        provenance = str(row.get("Provenance") or "imported").strip() or "imported"
-        current = repo.get(rel_id) if rel_id else None
-        if current is None:
-            repo.create(rel_id=rel_id or None, provenance=provenance, created_by=imported_by, **fields)
-            result.created += 1
-            continue
-        changed = {k: v for k, v in fields.items() if getattr(current, k) != (v if k != "doc_types" else [DocType(d) for d in v])}
-        if not changed:
-            result.unchanged += 1
-            continue
-        repo.update(current.id, changed_by=imported_by, change_note=f"imported from {source}", **changed)
-        result.updated += 1
-    return result
-
-
 def import_xlsx(repo: TerminologyRepository, path: Path | str, imported_by: str = "import") -> ImportResult:
-    wb = load_workbook(path, data_only=True)
-    try:
-        ws = wb["Relationships"] if "Relationships" in wb.sheetnames else wb.worksheets[0]
-        header = [c.value for c in ws[1]]
-        if 'Canonical' not in header:
-            raise ValueError('Missing Canonical column. Use a Kaizen terminology export.')
-        rows = [dict(zip(header, r)) for r in ws.iter_rows(min_row=2, values_only=True)]
-        with repo.db.transaction():
-            return _apply_rows(repo, rows, imported_by, Path(path).name)
-    finally:
-        wb.close()
+    """Import the native column format through the same validation used by the CLI and UI."""
+    from kaizen.terminology.source_import import import_source
+
+    result = import_source(repo, path, imported_by)
+    return ImportResult(result.created if result.applied else 0, result.updated if result.applied else 0, result.unchanged, result.errors)
 
 
 def import_csv(repo: TerminologyRepository, path: Path | str, imported_by: str = "import") -> ImportResult:
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        if not reader.fieldnames or 'Canonical' not in reader.fieldnames:
-            raise ValueError('Missing Canonical column. Use a Kaizen terminology export.')
-        rows = list(reader)
-    with repo.db.transaction():
-        return _apply_rows(repo, rows, imported_by, Path(path).name)
+    return import_xlsx(repo, path, imported_by)

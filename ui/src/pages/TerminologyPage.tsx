@@ -1,17 +1,18 @@
 // Terminology: the versioned rules that let the next run clear a wording it has already
-// seen. Visual rules: docs/design/DESIGN.md. Routes, API calls and behaviour are unchanged.
-import { ArrowsClockwise, Check, CheckCircle, ClockCounterClockwise, FileArrowUp, FileXls, MagnifyingGlass, Plus, Prohibit, TextAa, X } from "@phosphor-icons/react";
+// seen. Visual rules: docs/design/DESIGN.md.
+import { ArrowsClockwise, Check, CheckCircle, ClockCounterClockwise, MagnifyingGlass, Plus, Prohibit, TextAa, X } from "@phosphor-icons/react";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type RelationshipCreateBody } from "../api";
 import { Badge } from "../components/Badges";
 import { ErrorBox, Loading, Notice } from "../components/Feedback";
-import { AnchorButton, Button, Card, CardHead, Dialog, Divider, EmptyState, Field, PageHeader, TableSkeleton } from "../components/ui";
+import { TerminologyImport } from "../components/TerminologyImport";
+import { Button, Card, CardHead, Dialog, Divider, EmptyState, Field, PageHeader, TableSkeleton } from "../components/ui";
 import { fmtDate } from "../lib/format";
 import { useReviewer } from "../lib/reviewer";
 import { useToast } from "../lib/toast";
 import { errorMessage, useAsync } from "../lib/useAsync";
-import { DOC_TYPES, type ImportResult, type Relationship } from "../types";
+import { DOC_TYPES, type Relationship } from "../types";
 
 type ScopeFilter = "" | "global" | "family" | "sku";
 
@@ -57,7 +58,6 @@ function Toggle({ on, onClick, children, title, disabled }: { on: boolean; onCli
 
 export default function TerminologyPage() {
   const [sp, setSp] = useSearchParams();
-  const { name } = useReviewer();
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
@@ -66,10 +66,6 @@ export default function TerminologyPage() {
   const list = useAsync(() => api.terminology.list({ search: applied || undefined, all: true }), [applied]);
   const selectedId = sp.get("id");
   const [creating, setCreating] = useState(false);
-  const [importMsg, setImportMsg] = useState<ImportResult | null>(null);
-  const [importErr, setImportErr] = useState<string | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importing, setImporting] = useState(false);
 
   const visible = useMemo(() => {
     const all = list.data ?? [];
@@ -89,27 +85,6 @@ export default function TerminologyPage() {
     if (id) n.set("id", id);
     else n.delete("id");
     setSp(n, { replace: true });
-  };
-
-  const doImport = async () => {
-    if (!importFile) return;
-    setImporting(true);
-    setImportErr(null);
-    setImportMsg(null);
-    try {
-      const res = await api.terminology.importFile(importFile, name || "import");
-      setImportMsg(res);
-      toast({
-        tone: res.errors.length ? "warn" : "ok",
-        title: res.errors.length ? "Import finished with problems" : "Import finished",
-        description: `${res.created} created, ${res.updated} updated, ${res.unchanged} unchanged${res.errors.length ? `, ${res.errors.length} row${res.errors.length === 1 ? "" : "s"} rejected` : ""}`,
-      });
-      list.reload();
-    } catch (e) {
-      setImportErr(errorMessage(e));
-    } finally {
-      setImporting(false);
-    }
   };
 
   const empty = rows.length === 0 && !!list.data;
@@ -293,47 +268,7 @@ export default function TerminologyPage() {
           )}
         </div>
 
-        <Card>
-          <CardHead
-            title="Import and export"
-            description="Import an XLSX or CSV file using the exported column format."
-          />
-          <div className="p-4 space-y-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <Field label="File to import" htmlFor="terminology-import" className="w-full sm:w-80 max-w-full">
-                <input
-                  id="terminology-import"
-                  type="file"
-                  accept=".xlsx,.csv"
-                  className="file-input"
-                  onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-                />
-              </Field>
-              <Button icon={<FileArrowUp size={16} />} loading={importing} disabled={!importFile || importing} onClick={doImport}>
-                Import
-              </Button>
-              <AnchorButton href={api.terminology.exportUrl()} download icon={<FileXls size={16} />}>
-                Export .xlsx
-              </AnchorButton>
-            </div>
-            {importErr && <ErrorBox error={importErr} />}
-            {importMsg && (
-              <Notice kind={importMsg.errors.length ? "warn" : "good"}>
-                <div className="font-medium">{importMsg.summary}</div>
-                <div className="text-ink-2 mt-0.5">
-                  <span className="num">{importMsg.created}</span> created · <span className="num">{importMsg.updated}</span> updated · <span className="num">{importMsg.unchanged}</span> unchanged
-                </div>
-                {importMsg.errors.length > 0 && (
-                  <ul className="list-disc pl-5 mt-1.5 space-y-0.5 text-ink-2">
-                    {importMsg.errors.map((e, i) => (
-                      <li key={i}>{e}</li>
-                    ))}
-                  </ul>
-                )}
-              </Notice>
-            )}
-          </div>
-        </Card>
+        <TerminologyImport onImported={list.reload} />
       </div>
 
       {creating && (

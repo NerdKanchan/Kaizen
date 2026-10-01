@@ -1,6 +1,7 @@
 """API contract used by the reviewer UI. Runs against a temporary workspace; no network."""
 
 import io
+import json
 
 import openpyxl
 import pytest
@@ -16,6 +17,30 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 DHARMA = "dharma.reddy@bd.com"
 HEMANT = "hemant@bd.com"
 PASSWORD = "review-the-boms-2026"
+
+
+def test_source_import_preview_apply_and_protected_workbook(env):
+    client, _, ws, _ = env
+    data = b"ERP,Customer,Component\nSOURCE IMPORT END CAP,Source import cap,0000123\n"
+    file = {"file": ("approved-source.csv", data, "text/csv")}
+    inspected = client.post("/api/terminology/inspect", files=file)
+    assert inspected.status_code == 200 and inspected.json()["columns"] == ["ERP", "Customer", "Component"]
+    mapping = json.dumps({"Canonical": "Customer", "Aliases": ["ERP"], "Item Anchors": "Component"})
+    options = {"column_map": mapping, "dry_run": "true", "default_scope": "sku:1175108DNS", "by": "forged@bd.com"}
+    before = len(ws.repository.list())
+    preview = client.post("/api/terminology/import", files=file, data=options)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["created"] == 1 and not preview.json()["applied"]
+    assert len(ws.repository.list()) == before
+    options.update(dry_run="false", expected_version=preview.json()["source"]["terminology_version"])
+    applied = client.post("/api/terminology/import", files=file, data=options)
+    assert applied.status_code == 200 and applied.json()["applied"]
+    rel = ws.repository.get(applied.json()["rows"][0]["id"])
+    assert rel.created_by == DHARMA and "approved-source.csv" in rel.notes and rel.item_anchors == ["0000123"]
+    protected = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + "DRMEncryptedTransform".encode("utf-16le")
+    blocked = client.post("/api/terminology/inspect", files={"file": ("protected.xlsx", protected, XLSX_MIME)})
+    assert blocked.status_code == 400 and "authorized user" in blocked.json()["detail"]
+    assert not list((ws.path / "uploads").glob("inspect-*"))
 
 
 @pytest.fixture(scope="module")
@@ -117,7 +142,7 @@ def test_mining_action_items_verify_close_business_and_exports(env):
     assert r.status_code == 200 and r.json()["id"].startswith("REL-")
     s2 = next(x for x in sugg if "GUIDEWIRE" in x["a_text"].upper())
     assert client.post(f"/api/runs/{run_id}/mining/reject", json={"a_key": s2["a_key"], "b_key": s2["b_key"], "by": "Hemant", "note": "different"}).status_code == 200
-    assert not any(x["a_key"] == s2["a_key"] for x in client.get(f"/api/runs/{run_id}/mining").json())
+    assert not any(x["pair_key"] == s2["pair_key"] for x in client.get(f"/api/runs/{run_id}/mining").json())
 
     row = client.get(f"/api/runs/{run_id}/results", params={"check": "PCO_BOM", "sku": "1395108QNS", "discrepancy": "PCO_CHANGE_NOT_APPLIED"}).json()["rows"][0]
     ai = client.post(f"/api/runs/{run_id}/action-items", json={"row_id": row["row_id"], "reviewer": "Dharma", "owner": "R&D"}).json()

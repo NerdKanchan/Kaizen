@@ -19,7 +19,7 @@ class FuzzyScore:
 
 
 def content_tokens(n: NormalizedText) -> list[str]:
-    return [t for t in n.tokens if t not in STOPWORDS]
+    return [t for t in (n.matching_tokens or n.tokens) if t not in STOPWORDS]
 
 
 def similarity(a: NormalizedText, b: NormalizedText) -> FuzzyScore:

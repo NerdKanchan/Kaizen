@@ -209,6 +209,7 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
                   <th>BOM wording</th>
                   <th>Label or drawing wording</th>
                   <th className="text-right">SKUs</th>
+                  <th className="text-right">Confidence</th>
                   <th className="text-right">Would clear</th>
                   <th className="text-right">Still review</th>
                   <th className="text-right">Cumulative</th>
@@ -222,6 +223,9 @@ function WorklistSection({ runId, wl, onDone }: { runId: string; wl: Worklist; o
                     <td className="min-w-[12rem] font-medium text-ink">{it.a_text}</td>
                     <td className="min-w-[12rem] font-medium text-ink">{it.b_text}</td>
                     <td className="text-right num">{it.sku_count}</td>
+                    <td className="text-right num" title={`Weakest reviewer-facing score; mean ${it.mean_score.toFixed(2)}`}>
+                      {it.confidence.toFixed(2)}
+                    </td>
                     <td>
                       <div className="flex items-center justify-end gap-2" title="Rows that clear as an equivalent match once this pairing is approved">
                         <MiniBar value={it.would_clear} max={maxClear} width={64} color={CLASS_COLORS.EQUIVALENT} />

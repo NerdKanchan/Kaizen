@@ -194,6 +194,12 @@ comparisons. The supplied delivery validates 373 BOM rows, all 140 label quantit
 on every drawing sheet. These extraction checks do not establish real-data matching accuracy or release
 approval. See [the detailed findings and remaining work](docs/real-data-validation.md).
 
+For the protected relationship workbook, obtain a permitted readable export from an authorized owner.
+The Terminology page and `kaizen terminology inspect/import` support worksheet selection, column mapping,
+a preview, atomic validation and repeat imports without duplicate rules. Then run the audit with
+`--workspace kaizen-workspace --baseline out/real-bd/run.json --out out/real-bd-after-relationships` to
+measure coverage changes on identical input files. See [the import workflow](docs/relationship-import.md).
+
 ## Documents
 `docs/solution-overview.md` (plain-language overview for presenting), `docs/system-description.md` (what was built, module by module),
 `docs/design/DESIGN.md` and `docs/design/PRODUCT.md` (the reviewer interface's visual system and product truth),

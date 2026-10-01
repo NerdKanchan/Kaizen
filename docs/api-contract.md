@@ -157,7 +157,21 @@ ActionItem: `{id, run_id, row_id, sku, check_type, discrepancy_type, severity, d
 | GET | `/api/terminology?search=&scope=&all=` | `[Relationship + {usage}]` |
 | POST | `/api/terminology` | `{canonical, aliases[], scope, doc_types[], item_anchors[], provenance?, by, notes}` |
 | GET | `/api/terminology/{id}` · PUT `/api/terminology/{id}` `{canonical?, aliases?, scope?, doc_types?, item_anchors?, notes?, by, note}` · POST `/{id}/deactivate` `{by}` · POST `/{id}/activate` · DELETE `/{id}?by=` · GET `/{id}/history` |
-| GET | `/api/terminology/export.xlsx` · POST `/api/terminology/import` (multipart `file`, form `by`) → `{summary (string, e.g. "created 1, updated 0, unchanged 9, errors 0"), created, updated, unchanged, errors[]}` |
+| GET | `/api/terminology/export.xlsx` | Download the Kaizen column format. |
+| POST | `/api/terminology/inspect` | Multipart `file`, optional `sheet`, `header_row` (default 1) → `{sheets[], sheet, header_row, columns[], row_count, sample:[{row, values}], column_map, sha256, header_error}`. Invalid headers still return the worksheet inventory so another table can be selected. |
+| POST | `/api/terminology/import` | Multipart `file`, optional `sheet`, `header_row`, `column_map` (JSON object), `default_scope` (default global), `dry_run` (default false), `expected_version` (preview terminology snapshot). Returns `{summary, created, updated, unchanged, errors[], dry_run, applied, rows:[{row, action, id, canonical, aliases[], scope, item_anchors[], doc_types[], active}], source:{file, sha256, sheet, header_row, column_map, terminology_version}}`. |
 | GET | `/api/audit?limit=200` | recent audit events |
 
 Relationship: `{id, canonical, aliases[], scope, doc_types[], item_anchors[], provenance (manual|learned|imported), created_by, created_at, updated_at, active, notes, version}`.
+
+Column mapping keys are `ID`, `Canonical`, `Aliases`, `Scope`, `Doc Types`, `Item Anchors`, `Provenance`,
+`Created By`, `Active`, and `Notes`; values are source column names or arrays of names. Multiple columns
+are supported for Aliases, Doc Types and Item Anchors. With no mapping, Kaizen column names are recognised
+case-insensitively. The verified session supplies the author; uploaded `Created By` and form `by` never
+override it. These POST endpoints require application administrator access.
+
+Counts describe planned changes when `dry_run=true` or when errors block an import. Any invalid mapped row
+blocks the entire import, with `applied=false`. IDs update existing rules and record a new version; no-ID
+rows with the same terms, scope, document types and anchors are unchanged, including inactive rules.
+Formula cells require a values-only export. Protected Excel containers return an actionable 400.
+See [authorized relationship imports](relationship-import.md) for the local export and comparison workflow.

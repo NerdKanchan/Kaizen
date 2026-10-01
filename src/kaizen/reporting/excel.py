@@ -525,7 +525,7 @@ def _accuracy_sheet(ws, metrics: dict[str, Any]) -> None:
     ws.column_dimensions["B"].width = 16
 
 
-WORKLIST_COLUMNS = ["Rank", "BOM wording", "Label / drawing wording", "SKUs", "Rows", "Would auto-clear", "Still need review", "Cumulative cleared", "Cumulative % of needs-validation", "Confirmed by reviewers", "Contradicted", "Item anchors", "Row IDs"]
+WORKLIST_COLUMNS = ["Rank", "BOM wording", "Label / drawing wording", "SKUs", "Rows", "Confidence", "Would auto-clear", "Still need review", "Cumulative cleared", "Cumulative % of needs-validation", "Confirmed by reviewers", "Contradicted", "Item anchors", "Row IDs"]
 
 
 def _worklist_sheet(ws, wl: dict[str, Any]) -> None:
@@ -534,7 +534,7 @@ def _worklist_sheet(ws, wl: dict[str, Any]) -> None:
     ws.cell(row=2, column=1, value=f"Rows needing validation in this run: {wl['needs_validation']}. Behind unconfirmed pairings: {wl['potential_rows']}. Approving the top 5 clears {wl['top5']['rows']} rows ({wl['top5']['pct']}%); the top 10 clears {wl['top10']['rows']} ({wl['top10']['pct']}%). Approval is a reviewer action in the UI or `kaizen terminology add`; nothing here is applied automatically.").alignment = WRAP
     _write_header(ws, 4, WORKLIST_COLUMNS)
     for i, it in enumerate(wl["items"], start=1):
-        vals = [i, it["a_text"], it["b_text"], it["sku_count"], len(it["row_ids"]), it["would_clear"], it["still_review"], it["cumulative_clear"], it["cumulative_pct"], it["confirmed"], it["contradicted"], ", ".join(it["item_anchors"]), ", ".join(it["row_ids"])]
+        vals = [i, it["a_text"], it["b_text"], it["sku_count"], len(it["row_ids"]), it["confidence"], it["would_clear"], it["still_review"], it["cumulative_clear"], it["cumulative_pct"], it["confirmed"], it["contradicted"], ", ".join(it["item_anchors"]), ", ".join(it["row_ids"])]
         for c, v in enumerate(vals, start=1):
             ws.cell(row=4 + i, column=c, value=v).border = BORDER
     for col, w in {"B": 36, "C": 40, "L": 24, "M": 60}.items():

@@ -48,3 +48,21 @@ def test_run_records_relationship_usage_in_workspace(tmp_path):
     assert r.exit_code == 0
     r = runner.invoke(app, ["--workspace", str(ws), "runs", "relationships", run_id])
     assert r.exit_code == 0 and "Surgical Tape" in r.output and "(renamed)" not in r.output and "v1" in r.output
+
+
+def test_authorized_source_mapping_preview_and_repeat_import(tmp_path):
+    path = tmp_path / "authorized.csv"
+    path.write_text("ERP,Customer,Component\nDEAD END SOURCE CAP,Customer end cap,0000123\n")
+    ws = tmp_path / "ws"
+    inspected = runner.invoke(app, ["terminology", "inspect", str(path)])
+    assert inspected.exit_code == 0 and '"ERP"' in inspected.output
+    command = ["--workspace", str(ws), "terminology", "import", str(path), "--canonical-column", "Customer", "--alias-column", "ERP",
+               "--anchor-column", "Component", "--default-scope", "sku:1175108DNS", "--by", "quality"]
+    preview = runner.invoke(app, command + ["--dry-run"])
+    assert preview.exit_code == 0 and "Preview: created 1" in preview.output
+    listed = runner.invoke(app, ["--workspace", str(ws), "terminology", "list"])
+    assert "Customer end cap" not in listed.output
+    imported = runner.invoke(app, command)
+    assert imported.exit_code == 0 and "created 1" in imported.output
+    again = runner.invoke(app, command)
+    assert again.exit_code == 0 and "created 0, updated 0, unchanged 1" in again.output

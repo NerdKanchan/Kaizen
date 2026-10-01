@@ -82,3 +82,33 @@ def test_deterministic_order_of_pairs():
     first = [(p.a_index, p.b_index) for p in run(a, b).pairs]
     second = [(p.a_index, p.b_index) for p in run(a, b).pairs]
     assert first == second == [(0, 2), (1, 1), (2, 0)]
+
+
+def test_global_assignment_preserves_two_valid_pairs_when_greedy_would_collide():
+    """A high-scoring shared candidate must not hide a second feasible pairing."""
+
+    class MatrixLadder:
+        def match(self, a, b, ctx=MatchContext()):
+            scores = {
+                ("A0", "B0"): 0.90,
+                ("A0", "B1"): 0.80,
+                ("A1", "B0"): 0.85,
+            }
+            score = scores.get((a.raw, b.raw))
+            if score is None:
+                from kaizen.matching.ladder import MatchOutcome
+
+                return MatchOutcome(MatchLevel.NONE, 0.0, "none")
+            from kaizen.matching.ladder import MatchOutcome
+
+            return MatchOutcome(MatchLevel.FUZZY, score, "candidate", candidate_score=score)
+
+    result = assign(
+        [normalize("A0"), normalize("A1")],
+        [normalize("B0"), normalize("B1")],
+        MatrixLadder(),
+        lambda i: MatchContext(),
+        TH,
+    )
+    assert {(p.a_index, p.b_index) for p in result.pairs} == {(0, 1), (1, 0)}
+    assert result.unmatched_a == [] and result.unmatched_b == []

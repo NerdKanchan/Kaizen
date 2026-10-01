@@ -40,17 +40,18 @@ different OCR result is never mistaken for the same run.
 
 ## Current comparison result
 
-Counts from the local audit with the default relationship store, after the review fixes below. Exempt rows
+Counts from the 1 October local audit with the default relationship store, after the assignment and
+normalization improvements. Exempt rows
 are shown separately and are not part of the classification counts. **MISSING means no accepted pairing was
 found**; it is not a verified product defect, and none of these figures is a measured matching accuracy.
 
 | Check | EXACT | EQUIVALENT | POTENTIAL | MISSING | Needs review | Exempt |
 |---|---:|---:|---:|---:|---:|---:|
-| BOM ↔ Label | 11 | 24 | 30 | 168 | 198 | 223 |
+| BOM ↔ Label | 11 | 24 | 34 | 160 | 194 | 223 |
 | BOM ↔ Drawing | 8 | 8 | 188 | 86 | 274 | 138 |
 | Label ↔ Drawing | 40 | 5 | 130 | 63 | 197 | 85 |
 
-669 rows need review across the three checks. Extraction is now dependable on this delivery;
+665 rows need review across the three checks. Extraction is now dependable on this delivery;
 matching is the limit. JDE descriptions are terse and noun-first ("MASK, VAPOR BARRIER"), while labels are
 customer wording ("Mask"), so most real pairings need approved terminology before they can clear.
 
@@ -75,7 +76,7 @@ A review of the real-data work found and fixed these before commit:
 
 | Priority | Gap | What resolves it |
 |---|---|---|
-| 1 | Approved terminology | The relationship workbook is protected by a BD sensitivity label with rights management, so there is no password to supply. Someone with access opens it in Excel and saves an unprotected copy, kept local, which can then be imported as versioned relationships. |
+| 1 | Approved terminology | The relationship workbook is protected by a BD sensitivity label with rights management. An authorized owner supplies a readable export where policy permits it. The [import workflow](relationship-import.md) supports column mapping, preview, versioned rules and a baseline coverage comparison. |
 | 1 | Real ground truth | A reviewer marks the true pairings, quantities, exclusions and discrepancies on these four sets. Only then can real precision, recall and false-clear rates be measured. |
 | 1 | Drawing applicability | None of the four BOMs references the supplied drawing's number; they reference a different assembly drawing. The owners need to confirm the released drawing for each SKU. |
 | 2 | Noun-first matching | One-word label lines ("Mask", "Gown", "Gloves") score zero against noun-first JDE descriptions. A rule that proposes such pairs as POTENTIAL would turn about 25 unpaired pairs on this delivery into review suggestions. |

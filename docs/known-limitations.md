@@ -25,16 +25,20 @@ is still unmeasured.
   Other layouts will need fixtures and, possibly, parser variants.
 
 ## Matching
-- Fuzzy pairs whose BOM tokens all appear in a long label line score 1.0 but remain POTENTIAL by design
-  (never auto-cleared). On the golden set that is ~80 of ~1,100 rows; the learning loop converts confirmed
-  ones into relationships so the next SKU auto-clears them.
+- Token-set similarity can reach 1.0 when BOM tokens are contained in a longer label description.
+  Reviewer-facing scores blend token order, token coverage and numeric conflicts; fuzzy matches remain
+  POTENTIAL. These similarity scores are not calibrated probabilities. The learning loop converts
+  reviewer-confirmed pairings into relationships used by the next run.
 - Thresholds (0.85 potential, 0.60 floor, 0.05 ambiguity) were chosen on synthetic data and are recorded in
   every run; they must be re-tuned on real documents.
 - The current assignment is one-to-one. A compound catheter/stylet label entry can represent multiple
   BOM components; approved assembly membership and quantity allocation are needed before such checks can
   be automated. ERP abbreviations and pack quantities need item-specific, reviewed relationships.
+- Dimension conversion adds comparison hints while retaining the original numeric tokens and conflict
+  guards. It does not yet compare structured dimensions, concentration, gauge and product attributes.
 - The supplied relationship workbook is protected by a BD sensitivity label with rights management, so no
-  password opens it; it has not been imported. An unprotected copy saved by someone with access is needed. MISSING means no accepted
+  password opens it; it has not been imported. A permitted readable export from an authorized owner is
+  needed. The [import workflow](relationship-import.md) supports column mapping and previews. MISSING means no accepted
   pairing was found; it is not proof that a physical component is absent.
 - Semantic matching (L4) needs a locally installed embedding model and is off by default; AI adjudication (L5)
   needs explicit opt-in and an API key and only produces labelled suggestions.

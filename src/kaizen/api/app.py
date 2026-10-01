@@ -57,7 +57,8 @@ from kaizen.review.progress import review_snapshot
 from kaizen.review.rundiff import diff_runs
 from kaizen.review.sessions import ReviewSession, SessionStore
 from kaizen.review.store import ReviewStore
-from kaizen.terminology.exchange import export_xlsx, import_csv, import_xlsx
+from kaizen.terminology.exchange import export_xlsx
+from kaizen.terminology.source_import import import_source, inspect_source
 from kaizen.workspace import Workspace
 
 SESSION_COOKIE = "kaizen_session"
@@ -828,19 +829,44 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return FileResponse(path, media_type=XLSX, filename="relationships.xlsx")
 
     @app.post("/api/terminology/import")
-    async def terminology_import(file: UploadFile = File(...), by: str = Form("import"), session=Depends(_identified)):
-        tmp = ws.path / "uploads" / f"import-{uuid.uuid4().hex[:8]}-{Path(file.filename or 'rels.xlsx').name}"
+    async def terminology_import(
+        file: UploadFile = File(...), by: str = Form("import"), dry_run: bool = Form(False),
+        column_map: str | None = Form(None), sheet: str | None = Form(None), header_row: int = Form(1),
+        default_scope: str = Form("global"), expected_version: str | None = Form(None), session=Depends(_identified),
+    ):
+        name = Path(file.filename or "rels.xlsx").name
+        tmp = ws.path / "uploads" / f"import-{uuid.uuid4().hex[:8]}{Path(name).suffix.lower()}"
         try:
             await _save_import(file, tmp)
-            result = await run_in_threadpool(import_csv if tmp.suffix.lower() == ".csv" else import_xlsx, ws.repository, tmp, session.reviewer)
+            mapping = json.loads(column_map) if column_map else None
+            result = await run_in_threadpool(import_source, ws.repository, tmp, session.reviewer, column_map=mapping,
+                                            sheet=sheet, header_row=header_row, default_scope=default_scope, dry_run=dry_run, source_name=name, expected_version=expected_version)
         except HTTPException:
             raise
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         except Exception as e:
-            raise HTTPException(400, f"Could not read the terminology file ({type(e).__name__}). Use a Kaizen CSV or XLSX export.")
+            raise HTTPException(400, f"Could not read the terminology file ({type(e).__name__}). Supply a readable XLSX or CSV export.")
         finally:
             tmp.unlink(missing_ok=True)
             await file.close()
-        return {"summary": result.summary(), "created": result.created, "updated": result.updated, "unchanged": result.unchanged, "errors": result.errors}
+        return result.to_dict()
+
+    @app.post("/api/terminology/inspect")
+    async def terminology_inspect(file: UploadFile = File(...), sheet: str | None = Form(None), header_row: int = Form(1)):
+        tmp = ws.path / "uploads" / f"inspect-{uuid.uuid4().hex[:8]}{Path(file.filename or 'rels.xlsx').suffix.lower()}"
+        try:
+            await _save_import(file, tmp)
+            return await run_in_threadpool(inspect_source, tmp, sheet, header_row)
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(400, f"Could not read the terminology file ({type(e).__name__}). Supply a readable XLSX or CSV export.")
+        finally:
+            tmp.unlink(missing_ok=True)
+            await file.close()
 
     @app.post("/api/terminology")
     def create_relationship(payload: RelationshipInput, session=Depends(_identified)):

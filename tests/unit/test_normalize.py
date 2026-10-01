@@ -71,3 +71,15 @@ def test_tokens_list():
 
 def test_curated_abbreviations_expand():
     assert normalize("ECG Leads Assy").normalized == "ECG LEAD ASSEMBLY"
+
+
+def test_real_delivery_ocr_variants_are_normalized():
+    assert normalize("TAPE, MEASUARING PAPER").normalized == "TAPE MEASURING PAPER"
+    assert normalize("Lidocaine HCIl 1%").normalized == "LIDOCAINE HCL 1%"
+
+
+def test_matching_tokens_collapse_metric_and_imperial_dimensions():
+    metric = normalize("Gauze, 10 cm x 10 cm (4 in. x 4 in.)")
+    terse = normalize("GAUZE PAD, 4X4 12 PLY")
+    assert "DIM_4.00X4.00" in metric.matching_tokens
+    assert "DIM_4.00X4.00" in terse.matching_tokens

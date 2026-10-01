@@ -29,6 +29,10 @@ class Suggestion:
     still_review: int = 0  # rows that carry a discrepancy (e.g. a quantity mismatch) and need a reviewer regardless
     cumulative_clear: int = 0  # running total down the ranked worklist
     cumulative_pct: float = 0.0  # ... as a share of all rows needing validation
+    mean_score: float = 0.0
+    minimum_score: float = 0.0
+    mean_candidate_score: float = 0.0
+    confidence: float = 0.0  # conservative: the weakest reviewer-facing score in the group
 
     @property
     def pair_key(self) -> str:
@@ -37,6 +41,7 @@ class Suggestion:
     @property
     def evidence(self) -> str:
         parts = [f"seen in {self.sku_count} SKU(s)", f"checks: {', '.join(self.check_types)}"]
+        parts.append(f"confidence floor {self.confidence:.2f}")
         parts.append(f"confirmed by reviewers in {self.confirmed} comparison(s)" if self.confirmed else "not yet confirmed by a reviewer")
         parts.append(f"contradicted in {self.contradicted} comparison(s)" if self.contradicted else "never contradicted")
         return "; ".join(parts)
@@ -47,6 +52,7 @@ def mine_suggestions(run: Run, review: ReviewStore, repo: TerminologyRepository,
     rejected = {r[0] for r in repo.conn.execute("SELECT pair_key FROM mining_rejections")}
     decisions = review.all_decisions(run.metadata.run_id)
     groups: dict[tuple[str, str], Suggestion] = {}
+    metrics: dict[tuple[str, str], list[float]] = {}
     for r in run.results:
         if r.match_level is not MatchLevel.FUZZY or r.source_a is None or r.source_b is None:
             continue
@@ -67,6 +73,7 @@ def mine_suggestions(run: Run, review: ReviewStore, repo: TerminologyRepository,
             s.still_review += 1
         else:
             s.would_clear += 1
+        metrics.setdefault(key, []).append(r.score)
         if r.source_a.item_number and r.source_a.item_number not in s.item_anchors:
             s.item_anchors.append(r.source_a.item_number)
         for d in decisions.get(r.row_id, {}).values():
@@ -77,9 +84,20 @@ def mine_suggestions(run: Run, review: ReviewStore, repo: TerminologyRepository,
     out = []
     for s in groups.values():
         s.sku_count = len(s.skus)
+        scores = metrics[s.a_key, s.b_key]
+        if scores:
+            s.mean_score = round(sum(scores) / len(scores), 4)
+            s.minimum_score = round(min(scores), 4)
+            s.confidence = s.minimum_score
+            candidate_scores = [
+                r.candidate_score if r.candidate_score is not None else r.score
+                for r in run.results
+                if r.row_id in s.row_ids
+            ]
+            s.mean_candidate_score = round(sum(candidate_scores) / len(candidate_scores), 4) if candidate_scores else 0.0
         if s.sku_count >= min_skus and s.pair_key not in rejected:
             out.append(s)
-    out.sort(key=lambda s: (-s.sku_count, -s.confirmed, s.contradicted, s.a_text))
+    out.sort(key=lambda s: (-s.confidence, -s.sku_count, -s.would_clear, -s.confirmed, s.contradicted, s.a_text))
     return out
 
 
@@ -116,7 +134,10 @@ def terminology_worklist(run: Run, review: ReviewStore, repo: TerminologyReposit
     from kaizen.review.business import reviewable
 
     items = mine_suggestions(run, review, repo, min_skus=1)
-    items.sort(key=lambda s: (-s.would_clear, -s.sku_count, s.a_text))
+    # Impact remains the primary rank. Confidence breaks ties so the reviewer
+    # sees the strongest repeated wording before weaker candidates with the
+    # same projected impact.
+    items.sort(key=lambda s: (-s.would_clear, -s.confidence, -s.sku_count, -s.confirmed, s.a_text))
     needs = sum(1 for r in reviewable(run) if r.requires_validation)
     total = 0
     for s in items:

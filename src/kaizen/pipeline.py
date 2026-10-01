@@ -27,6 +27,7 @@ from kaizen.ingest.detect import parse_document
 from kaizen.ingest.grouping import group_by_sku, identity_key
 from kaizen.ingest.hashing import sha256_file
 from kaizen.ingest.ocr import available_engines
+from kaizen.matching.assignment import ASSIGNMENT_VERSION
 from kaizen.matching.ladder import MatchLadder
 from kaizen.matching.normalize import NORMALIZER_VERSION
 from kaizen.models import AuditEvent, CoverageFinding, DiscrepancyType, DocType, InputFile, Run, RunMetadata, Thresholds
@@ -209,6 +210,7 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
         "bom_table": bom_table.PARSER_VERSION,
         "label_pdf": label_pdf.PARSER_VERSION,
         "normalizer": NORMALIZER_VERSION,
+        "assignment": ASSIGNMENT_VERSION,
         "categorizer_rules": CATEGORIZER_VERSION,
         "check_bom_label": CHECK_VERSION,
         "pco": pco_parser.PARSER_VERSION,

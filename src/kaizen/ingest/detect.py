@@ -13,6 +13,7 @@ from kaizen.ingest.bom_table import parse_bom_table
 from kaizen.ingest.drawing_pdf import parse_drawing_pdf
 from kaizen.ingest.label_pdf import parse_label_pdf
 from kaizen.ingest.pco import parse_pco
+from kaizen.ingest.workbook import workbook_access_problem
 from kaizen.models import DocType, Document
 
 _FILENAME_TOKENS = {
@@ -98,18 +99,8 @@ def detect_doc_type(path: Path | str) -> DocType | None:
 
 def parse_document(path: Path | str) -> ParseOutcome:
     path = Path(path)
-    if path.suffix.lower() in (".xlsx", ".xlsm"):
-        with path.open("rb") as fh:
-            prefix = fh.read(65536)
-        if prefix.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
-            if "DRMEncryptedTransform".encode("utf-16le") in prefix:
-                # Microsoft Purview sensitivity label with rights management: there is no password to supply.
-                reason = "workbook is protected by a sensitivity label (rights management), so no password opens it; someone with access must open it in Excel and save an unprotected copy"
-            elif "EncryptedPackage".encode("utf-16le") in prefix:
-                reason = "encrypted Excel workbook; an unlocked copy is required"
-            else:
-                reason = "legacy Excel container with an XLSX extension; export as an unlocked XLSX workbook"
-            return ParseOutcome(str(path), None, None, reason)
+    if reason := workbook_access_problem(path):
+        return ParseOutcome(str(path), None, None, reason)
     doc_type = detect_doc_type(path)
     ext = path.suffix.lower()
     if doc_type is DocType.BOM:

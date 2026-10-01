@@ -443,6 +443,31 @@ export interface ImportResult {
   updated: number;
   unchanged: number;
   errors: string[];
+  dry_run: boolean;
+  applied: boolean;
+  rows: { row: number; action: "create" | "update" | "unchanged"; id: string; canonical: string; aliases: string[]; scope: string; item_anchors: string[]; doc_types: string[]; active: boolean }[];
+  source: { file: string; sha256: string; sheet: string; header_row: number; column_map: Record<string, string[]>; terminology_version: string };
+}
+
+export interface TerminologySource {
+  sheets: string[];
+  sheet: string;
+  header_row: number;
+  columns: string[];
+  row_count: number;
+  sample: { row: number; values: Record<string, string> }[];
+  column_map: Record<string, string[]>;
+  sha256: string;
+  header_error: string | null;
+}
+
+export interface TerminologyImportOptions {
+  sheet?: string;
+  header_row?: number;
+  column_map?: Record<string, string[]>;
+  default_scope?: string;
+  dry_run?: boolean;
+  expected_version?: string;
 }
 
 export interface MiningSuggestion {
@@ -460,6 +485,10 @@ export interface MiningSuggestion {
   item_anchors: string[];
   relationship_id: string | null;
   evidence: string;
+  mean_score: number;
+  minimum_score: number;
+  mean_candidate_score: number;
+  confidence: number;
 }
 
 /** A mining suggestion with its impact: rows that auto-clear once the pairing is approved. */

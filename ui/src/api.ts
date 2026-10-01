@@ -14,6 +14,8 @@ import type {
   DocumentSummary,
   Health,
   ImportResult,
+  TerminologyImportOptions,
+  TerminologySource,
   MiningSuggestion,
   Relationship,
   RelationshipHistory,
@@ -222,10 +224,20 @@ export const api = {
     deactivate: (id: string, by: string) => request<Relationship>(`/api/terminology/${enc(id)}/deactivate`, json("POST", { by })),
     history: (id: string) => request<RelationshipHistory[]>(`/api/terminology/${enc(id)}/history`),
     exportUrl: () => "/api/terminology/export.xlsx",
-    importFile: (file: File, by: string) => {
+    inspectFile: (file: File, sheet?: string, headerRow = 1) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      if (sheet) fd.append("sheet", sheet);
+      fd.append("header_row", String(headerRow));
+      return request<TerminologySource>("/api/terminology/inspect", { method: "POST", body: fd });
+    },
+    importFile: (file: File, by: string, options: TerminologyImportOptions = {}) => {
       const fd = new FormData();
       fd.append("file", file, file.name);
       fd.append("by", by);
+      for (const [key, value] of Object.entries(options)) {
+        if (value !== undefined) fd.append(key, key === "column_map" ? JSON.stringify(value) : String(value));
+      }
       return request<ImportResult>("/api/terminology/import", { method: "POST", body: fd });
     },
   },
