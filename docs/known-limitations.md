@@ -31,11 +31,12 @@ is still unmeasured.
   reviewer-confirmed pairings into relationships used by the next run.
 - Thresholds (0.85 potential, 0.60 floor, 0.05 ambiguity) were chosen on synthetic data and are recorded in
   every run; they must be re-tuned on real documents.
-- The current assignment is one-to-one. A compound catheter/stylet label entry can represent multiple
-  BOM components; approved assembly membership and quantity allocation are needed before such checks can
-  be automated. ERP abbreviations and pack quantities need item-specific, reviewed relationships.
-- Dimension conversion adds comparison hints while retaining the original numeric tokens and conflict
-  guards. It does not yet compare structured dimensions, concentration, gauge and product attributes.
+- Live matching uses one-to-one assignment. The closed-testing candidate supports independently verified
+  assembly membership and quantity allocation; promoting those rules into live matching remains an
+  explicit release step. ERP abbreviations and pack quantities need reviewed relationships.
+- Live dimension conversion adds hints and retains numeric conflict guards. The closed-testing candidate
+  separately compares component type, dimensions, concentration, gauge and pack quantity. These parsers
+  still need validation on varied real descriptions; unspecified values do not establish compatibility.
 - The supplied relationship workbook is protected by a BD sensitivity label with rights management, so no
   password opens it; it has not been imported. A permitted readable export from an authorized owner is
   needed. The [import workflow](relationship-import.md) supports column mapping and previews. MISSING means no accepted
@@ -53,15 +54,19 @@ is still unmeasured.
   validation. No standalone case-label source was supplied.
 
 ## Review workflow
-- Reviewer identity, slot and blind mode are a server-side session and cannot be changed from the browser.
-  Sign-in needs a password, but registration is open to any `@bd.com` address without proving it belongs
-  to the person: no confirmation email is sent, because BD mail blocks external senders. A company-wide
-  deployment should use BD single sign-on. Forgotten passwords are set by an administrator. The session cookie is not marked `Secure` because
-  the local server is plain HTTP.
+- The shared app requires administrator approval for `@bd.com` registrations and checks each run's access
+  grants. Registration still does not prove email ownership; a company-wide deployment should use BD
+  single sign-on. Hosted configuration enables Secure cookies over HTTPS; local development uses HTTP.
+  Historical two-reviewer records remain readable, while new work uses a shared decision and explicit
+  approval. Forgotten passwords are set by an administrator.
 - With Supabase accounts only the login is shared: decisions, terminology and runs stay on the laptop where
   they were made. Sign-in needs internet access. Supabase rate-limits sign-ins per IP address, and a
   whole office behind one address shares that limit.
 - Sessions do not expire on their own; end one with "Sign out" or `kaizen review sessions --end <name>`.
+- Independently verified ground truth is required before feedback becomes candidate training data.
+  Reports remain unqualified when held-out labels are insufficient. Four SKUs cannot establish general
+  product accuracy; tester diversity and additional untouched SKU sets are needed. Candidates are not
+  automatically promoted and the system does not fine-tune an external foundation model.
 - Decisions live in the workspace database. Re-running the same inputs, extraction output, parser/checker
   versions and terminology reproduces the same run id and row ids. Changes to extracted text, quantities,
   confidence or geometry produce a different run id, preventing stale reviews from silently re-attaching.
@@ -78,6 +83,9 @@ is still unmeasured.
 - Annotated BOM marks need page geometry; spreadsheet BOMs get a separate review page instead.
 - Only reviewer decisions come back from an edited Excel workbook (`kaizen review import`, optional);
   other edits made in Excel are ignored.
+- XLSX exports store formula-like descriptions/comments as text. CSV terminology exports prefix
+  formula-like values with an apostrophe for spreadsheet safety; use XLSX when exact text preservation
+  is required.
 
 ## Not regulatory-compliant
 This is a hackathon prototype. It is deterministic, auditable and offline, but it has not been validated

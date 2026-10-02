@@ -1,6 +1,7 @@
 """Check 1: BOM ↔ Label — the shared pairing engine with the quantity policy, plus a REF/parent row and a
 single BLOCKER when the label's contents could not be extracted. Non-physical BOM lines are never compared."""
 
+from kaizen.checks.assemblies import apply_assemblies
 from kaizen.checks.base import RowIdFactory, header_item, pair_token, unparsed_bom_rows
 from kaizen.checks.pairing import CheckPolicy, disc, merge_duplicate_items, run_pairing_check
 from kaizen.ingest.grouping import identity_key
@@ -27,7 +28,7 @@ def comparable_bom_items(bom: Document) -> list[DocumentItem]:
     return merge_duplicate_items([i for i in bom.items if is_comparable_bom_item(i)[0]])
 
 
-def run_bom_label_check(bom: Document, label: Document, ladder: MatchLadder, thresholds: Thresholds) -> list[CheckResult]:
+def run_bom_label_check(bom: Document, label: Document, ladder: MatchLadder, thresholds: Thresholds, assembly_rules: list | None = None) -> list[CheckResult]:
     sku = bom.sku or label.sku or "UNKNOWN"
     ids = RowIdFactory(sku, "R", pair_token(bom.id, label.id))
     results = [_ref_row(bom, label, sku, ids, thresholds)]
@@ -41,7 +42,9 @@ def run_bom_label_check(bom: Document, label: Document, ladder: MatchLadder, thr
     if not label.items or label.header.get("unreadable_pages"):
         results.append(_label_unreadable_row(label, len(bom_items), sku, ids))
         return results
-    results.extend(run_pairing_check(bom, bom_items, label, list(label.items), POLICY, ladder, thresholds, sku, ids))
+    bom_items, label_items, assemblies = apply_assemblies(bom_items, list(label.items), assembly_rules or [], sku, ids, thresholds)
+    results.extend(assemblies)
+    results.extend(run_pairing_check(bom, bom_items, label, label_items, POLICY, ladder, thresholds, sku, ids))
     return results
 
 

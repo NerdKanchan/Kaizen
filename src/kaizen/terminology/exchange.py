@@ -9,6 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 from kaizen.models import Relationship
+from kaizen.reporting.workbook import csv_text, save_workbook
 from kaizen.terminology.repository import TerminologyRepository
 
 COLUMNS = ["ID", "Canonical", "Aliases", "Scope", "Doc Types", "Item Anchors", "Provenance", "Created By", "Active", "Notes", "Version", "Created At", "Updated At"]
@@ -69,7 +70,7 @@ def export_xlsx(repo: TerminologyRepository, path: Path | str) -> Path:
     ):
         info.append([line])
     info.column_dimensions["A"].width = 120
-    wb.save(path)
+    save_workbook(wb, path)
     return path
 
 
@@ -80,7 +81,7 @@ def export_csv(repo: TerminologyRepository, path: Path | str) -> Path:
         w = csv.writer(fh)
         w.writerow(COLUMNS)
         for r in repo.list(active_only=False):
-            w.writerow(_rel_to_row(r))
+            w.writerow([csv_text(value) for value in _rel_to_row(r)])
     return path
 
 

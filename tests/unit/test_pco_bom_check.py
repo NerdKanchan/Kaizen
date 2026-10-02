@@ -9,6 +9,15 @@ from tests.unit.test_bom_label_check import SHA, bom_doc
 TH = Thresholds()
 
 
+def test_applied_pco_change_with_low_confidence_bom_still_needs_review():
+    pco = pco_doc(["A"], [("ADD", "", "RM0737876", "CATHETER TRIMMING DEVICE", "1", "")])
+    bom = bom_doc([("RM0737876", "CATHETER TRIMMING DEVICE", "1")], parent="A")
+    bom.items[0].extraction_confidence = 0.3
+    row = by_key(run(pco, [bom]))[("A", "ADD:RM0737876")]
+    assert row.requires_validation
+    assert any(d.type is DiscrepancyType.LOW_EXTRACTION_CONFIDENCE for d in row.discrepancies)
+
+
 def pco_doc(codes, rows, number="PCO34590"):
     items = []
     for n, code in enumerate(codes, start=1):

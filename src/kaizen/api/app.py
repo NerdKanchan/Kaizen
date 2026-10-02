@@ -1,5 +1,6 @@
 """FastAPI backend for approved accounts and shared document reviews."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -7,8 +8,10 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import uuid
 import zipfile
+from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pymupdf
-from fastapi import Body, Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Body, Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi import Response as FastResponse
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -40,6 +43,7 @@ from kaizen.api.payloads import (
     RunShare,
     UserUpdate,
 )
+from kaizen.evaluation.learning import shadow_evaluate
 from kaizen.models import Classification, DocType, Run, Thresholds
 from kaizen.pipeline import SUPPORTED_SUFFIXES, load_run, run_folder, save_run
 from kaizen.reporting.annotated_bom import write_annotated_bom
@@ -52,6 +56,7 @@ from kaizen.review.auth import AuthError, LocalAccounts, SupabaseAccounts, accou
 from kaizen.review.business import BusinessAssumptions, business_case
 from kaizen.review.collaborative import CollaborativeReviewStore
 from kaizen.review.copies import copy_run, portable_payload, snapshot
+from kaizen.review.learning import DrawingInput, GroundTruthInput, LabelApproval, LearningStore
 from kaizen.review.mining import approve_suggestion, mine_suggestions, reject_suggestion, terminology_worklist
 from kaizen.review.progress import review_snapshot
 from kaizen.review.rundiff import diff_runs
@@ -191,6 +196,61 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     access = AccessStore(ws.db)
     items = ActionItemStore(ws.db)
     sessions = SessionStore(ws.db)
+    learning = LearningStore(ws.db)
+    learning_lock = threading.Lock()
+    learning_running: set[str] = set()
+
+    def automatic_learning(run_id):
+        while True:
+            with ws.db.transaction():
+                job = ws.db.conn.execute('SELECT * FROM learning_jobs WHERE run_id=?', (run_id,)).fetchone()
+                generation, actor = job['generation'], job['requested_by']
+                ws.db.conn.execute("UPDATE learning_jobs SET state='running',updated_at=? WHERE run_id=?", (datetime.now(timezone.utc).isoformat(), run_id))
+            try:
+                shadow_evaluate(ws, cache.get(run_id), actor)
+            except Exception:
+                logger.exception('Automatic learning failed for run %s', run_id)
+                with learning_lock:
+                    with ws.db.transaction():
+                        ws.db.conn.execute("UPDATE learning_jobs SET state='failed',error=? WHERE run_id=?", ('Candidate rebuild failed. An administrator can retry from Closed testing.', run_id))
+                    learning_running.discard(run_id)
+                return
+            with learning_lock:
+                with ws.db.transaction():
+                    newest = ws.db.conn.execute('SELECT generation FROM learning_jobs WHERE run_id=?', (run_id,)).fetchone()[0]
+                    ws.db.conn.execute('UPDATE learning_jobs SET completed_generation=?,state=?,error=\'\',updated_at=? WHERE run_id=?',
+                                       (generation, 'complete' if newest == generation else 'queued', datetime.now(timezone.utc).isoformat(), run_id))
+                if newest == generation:
+                    learning_running.discard(run_id)
+                    return
+
+    def queue_learning(run_id, actor, background):
+        with learning_lock:
+            if background is None and run_id in learning_running:
+                raise HTTPException(409, 'A candidate rebuild is already running. Wait for its result.')
+            with ws.db.transaction():
+                ws.db.conn.execute("INSERT INTO learning_jobs (run_id,generation,state,requested_by,updated_at) VALUES (?,1,'queued',?,?) ON CONFLICT(run_id) DO UPDATE SET generation=generation+1,state='queued',requested_by=excluded.requested_by,error='',updated_at=excluded.updated_at",
+                                   (run_id, actor, datetime.now(timezone.utc).isoformat()))
+            if run_id not in learning_running:
+                learning_running.add(run_id)
+                if background is not None:
+                    background.add_task(automatic_learning, run_id)
+
+    @asynccontextmanager
+    async def learning_lifespan(_app):
+        tasks = []
+        with learning_lock:
+            pending = list(ws.db.conn.execute("SELECT run_id FROM learning_jobs WHERE state IN ('queued','running')"))
+            for job in pending:
+                learning_running.add(job['run_id'])
+                tasks.append(asyncio.create_task(run_in_threadpool(automatic_learning, job['run_id'])))
+        try:
+            yield
+        finally:
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    app.router.lifespan_context = learning_lifespan
     # Where email + password are checked: this workspace, or Supabase (see kaizen.review.auth). Only the
     # credentials move; sessions, slots, blind mode and decisions always stay in the workspace.
     accounts = accounts or accounts_for(ws.db)
@@ -277,12 +337,16 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
             raise HTTPException(403, 'Only application administrators can change shared terminology.')
         rid = request.path_params.get('run_id')
         if rid:
-            edit = request.method not in ('GET', 'HEAD') or any(x in path for x in ('export.xlsx', 'certificate.pdf', 'annotated-bom', 'download.zip'))
+            edit = request.method not in ('GET', 'HEAD') or any(x in path for x in ('export.xlsx', 'certificate.pdf', 'annotated-bom', 'download.zip', '/learning/export', '/learning/observations'))
             require_run(rid, actor, edit=edit, owner=path.endswith('/sharing') or (request.method == 'PATCH' and path == f'/api/runs/{rid}'))
             if path.endswith('/diff') and request.query_params.get('against'):
                 require_run(request.query_params['against'], actor)
             if any(x in path for x in ('/relationships/from-row', '/mining/approve', '/mining/reject')) and not admin:
                 raise HTTPException(403, 'Only application administrators can change shared terminology.')
+            if '/learning/' in path and any(x in path for x in ('/approve', '/shadow', '/export', '/observations')) and not admin:
+                raise HTTPException(403, 'Application administrator access required for verified learning datasets.')
+            if path.endswith('/learning/enable'):
+                require_run(rid, actor, owner=True)
         ai_id = request.path_params.get('ai_id')
         if ai_id:
             ai = items.get(ai_id)
@@ -613,8 +677,108 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return Response(content=png, media_type="image/png")
 
     # ---- review -------------------------------------------------------------------------------
+    @app.get('/api/runs/{run_id}/learning')
+    def learning_summary(run_id: str):
+        with ws.db.transaction():
+            summary = learning.summary(cache.get(run_id))
+            job = ws.db.conn.execute('SELECT state,error FROM learning_jobs WHERE run_id=?', (run_id,)).fetchone()
+            return summary | {'automatic_learning': dict(job) if job else {'state': 'idle', 'error': None}}
+
+    @app.post('/api/runs/{run_id}/learning/enable')
+    def enable_learning(run_id: str, session=Depends(_identified)):
+        try:
+            learning.enroll(cache.get(run_id), session.reviewer)
+            return learning.summary(cache.get(run_id))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get('/api/runs/{run_id}/learning/rows/{row_id}')
+    def learning_row(run_id: str, row_id: str):
+        run = cache.get(run_id)
+        try:
+            with ws.db.transaction():
+                return learning.row_detail(run, _find(run, row_id))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.put('/api/runs/{run_id}/learning/rows/{row_id}')
+    def annotate_ground_truth(run_id: str, row_id: str, payload: GroundTruthInput, background: BackgroundTasks, session=Depends(_identified)):
+        run = cache.get(run_id)
+        try:
+            previous = learning.current('learning_labels', run_id, row_id)
+            record = learning.annotate(run, _find(run, row_id), payload, session.reviewer)
+            if previous and previous['status'] == 'approved':
+                queue_learning(run_id, session.reviewer, background)
+            return record
+        except ValueError as e:
+            raise HTTPException(409 if 'changed' in str(e) else 400, str(e))
+
+    @app.post('/api/runs/{run_id}/learning/rows/{row_id}/approve')
+    def approve_ground_truth(run_id: str, row_id: str, payload: LabelApproval, background: BackgroundTasks, session=Depends(_identified)):
+        try:
+            record = learning.approve('learning_labels', cache.get(run_id), row_id, payload, session.reviewer)
+            queue_learning(run_id, session.reviewer, background)
+            return record
+        except ValueError as e:
+            raise HTTPException(409 if 'changed' in str(e) else 400, str(e))
+
+    @app.put('/api/runs/{run_id}/learning/drawings/{sku}')
+    def annotate_drawing(run_id: str, sku: str, payload: DrawingInput, background: BackgroundTasks, session=Depends(_identified)):
+        try:
+            previous = learning.current('learning_drawings', run_id, sku)
+            record = learning.drawing(cache.get(run_id), sku, payload, session.reviewer)
+            if previous and previous['status'] == 'approved':
+                queue_learning(run_id, session.reviewer, background)
+            return record
+        except ValueError as e:
+            raise HTTPException(409 if 'changed' in str(e) else 400, str(e))
+
+    @app.post('/api/runs/{run_id}/learning/drawings/{sku}/approve')
+    def approve_drawing(run_id: str, sku: str, payload: LabelApproval, background: BackgroundTasks, session=Depends(_identified)):
+        try:
+            record = learning.approve('learning_drawings', cache.get(run_id), sku, payload, session.reviewer)
+            queue_learning(run_id, session.reviewer, background)
+            return record
+        except ValueError as e:
+            raise HTTPException(409 if 'changed' in str(e) else 400, str(e))
+
+    @app.get('/api/runs/{run_id}/learning/export.json')
+    def export_learning(run_id: str, split: str = Query('train', pattern='^(train|evaluation)$')):
+        try:
+            with ws.db.transaction():
+                dataset = learning.dataset(cache.get(run_id), split)
+            return JSONResponse(dataset, headers={'Content-Disposition': f'attachment; filename="kaizen-{run_id}-{split}.json"'})
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get('/api/runs/{run_id}/learning/observations.json')
+    def export_observations(run_id: str):
+        run = cache.get(run_id)
+        try:
+            learning.require_enrolled(run)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        with ws.db.transaction():
+            payload = {'schema_version': 1, 'run_id': run_id, 'purpose': 'Raw review observations; not verified training labels.',
+                       'rows': [{'engine': r.model_dump(mode='json'), 'history': review.history(run_id, r.row_id)} for r in run.results if review.decisions(run_id, r.row_id)],
+                       'timing': review.timing(run_id).to_dict()}
+        return JSONResponse(payload, headers={'Content-Disposition': f'attachment; filename="kaizen-{run_id}-observations.json"'})
+
+    @app.post('/api/runs/{run_id}/learning/shadow')
+    async def evaluate_learning(run_id: str, session=Depends(_identified)):
+        try:
+            learning.require_enrolled(cache.get(run_id))
+            queue_learning(run_id, session.reviewer, None)
+            await run_in_threadpool(automatic_learning, run_id)
+            job = ws.db.conn.execute('SELECT state,error FROM learning_jobs WHERE run_id=?', (run_id,)).fetchone()
+            if job['state'] == 'failed':
+                raise HTTPException(500, job['error'])
+            return json.loads(ws.db.conn.execute('SELECT payload FROM learning_evaluations WHERE run_id=? ORDER BY created_at DESC LIMIT 1', (run_id,)).fetchone()[0])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
     @app.post("/api/runs/{run_id}/decisions")
-    def post_decision(run_id: str, payload: DecisionInput, session: ReviewSession | None = Depends(_identified)):
+    def post_decision(run_id: str, payload: DecisionInput, background: BackgroundTasks, session: ReviewSession | None = Depends(_identified)):
         payload = payload.model_dump()
         run = cache.get(run_id)
         _find(run, payload["row_id"])
@@ -627,6 +791,9 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         except ValueError as e:
             raise HTTPException(400, str(e))
         merged = review.rows_for_viewer(run_id, [_find(run, payload["row_id"])], viewer_slot=slot, blind=blind)[0]
+        annotation = learning.current('learning_labels', run_id, payload['row_id'])
+        if annotation and annotation['status'] == 'approved':
+            queue_learning(run_id, session.reviewer, background)
         return {"row_id": payload["row_id"], "state": merged["state"], "decisions": {str(k): v for k, v in merged["decisions"].items()}, "effective_classification": merged["effective_classification"]}
 
     @app.post("/api/runs/{run_id}/finalize")
@@ -643,16 +810,24 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return {"row_id": payload["row_id"], "state": review.row_state(run_id, payload["row_id"]).state}
 
     @app.post("/api/runs/{run_id}/bulk-accept")
-    def post_bulk(run_id: str, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
+    def post_bulk(run_id: str, background: BackgroundTasks, payload: dict = Body(...), session: ReviewSession | None = Depends(_identified)):
         run = cache.get(run_id)
         slot, _ = _view_of(session)
-        return {"accepted": review.bulk_accept_clean(run_id, run.results, slot, session.reviewer)}
+        with ws.db.transaction():
+            approved = {a['row_id']: review.revision(run_id, a['row_id']) for a in learning.records('learning_labels', run_id) if a['status'] == 'approved'}
+            accepted = review.bulk_accept_clean(run_id, run.results, slot, session.reviewer)
+            changed = any(review.revision(run_id, row_id) != revision for row_id, revision in approved.items())
+        if changed:
+            queue_learning(run_id, session.reviewer, background)
+        return {"accepted": accepted}
 
     @app.post("/api/runs/{run_id}/relationships/from-row")
     def relationship_from_row(run_id: str, payload: RowRelationship, session: ReviewSession | None = Depends(_identified)):
         payload = payload.model_dump()
         run = cache.get(run_id)
         r = _find(run, payload["row_id"])
+        if learning.split(r.sku) == 'evaluation':
+            raise HTTPException(400, 'This SKU is reserved for evaluation. Its examples cannot become training terminology.')
         if r.source_a is None or r.source_b is None:
             raise HTTPException(400, "row has no pair to save as a relationship")
         canonical = payload.get("canonical") or r.source_b.description
@@ -670,16 +845,19 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
     def get_worklist(run_id: str, session: ReviewSession | None = Depends(_identified)):
         """Unconfirmed pairings ranked by the rows they would auto-clear once approved (human approval still required)."""
         run = cache.get(run_id)
-        return terminology_worklist(run, review, ws.repository).to_dict()
+        return terminology_worklist(training_run(run), review, ws.repository).to_dict()
+
+    def training_run(run):
+        return run.model_copy(update={'results': [r for r in run.results if learning.split(r.sku) != 'evaluation']})
 
     @app.get("/api/runs/{run_id}/mining")
     def get_mining(run_id: str, min_skus: int = 2):
         run = cache.get(run_id)
-        return [asdict(s) | {"evidence": s.evidence, "pair_key": s.pair_key} for s in mine_suggestions(run, review, ws.repository, min_skus=min_skus)]
+        return [asdict(s) | {"evidence": s.evidence, "pair_key": s.pair_key} for s in mine_suggestions(training_run(run), review, ws.repository, min_skus=min_skus)]
 
     def _suggestion(run_id: str, a_key: str, b_key: str):
         run = cache.get(run_id)
-        s = next((s for s in mine_suggestions(run, review, ws.repository, min_skus=1) if s.a_key == a_key and s.b_key == b_key), None)
+        s = next((s for s in mine_suggestions(training_run(run), review, ws.repository, min_skus=1) if s.a_key == a_key and s.b_key == b_key), None)
         if s is None:
             raise HTTPException(404, "suggestion not found (already approved or rejected?)")
         return s
@@ -791,7 +969,7 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         return diff_runs(before, after).to_dict()
 
     @app.post("/api/runs/{run_id}/decisions/import")
-    async def import_from_excel(run_id: str, file: UploadFile = File(...), dry_run: bool = Form(False), force: bool = Form(False), session: ReviewSession | None = Depends(_identified)):
+    async def import_from_excel(run_id: str, background: BackgroundTasks, file: UploadFile = File(...), dry_run: bool = Form(False), force: bool = Form(False), session: ReviewSession | None = Depends(_identified)):
         """Optional: apply the signed-in reviewer's decisions from an exported workbook. Slot and name come from the session."""
         if session is None:
             raise HTTPException(401, SIGN_IN_HINT)
@@ -802,6 +980,8 @@ def create_app(workspace: Workspace | None = None, ui_dir: Path | None = None, a
         try:
             await _save_import(file, dest)
             result = await run_in_threadpool(import_decisions, ws, run, dest, session.slot, session.reviewer, dry_run=dry_run, force=force, review_store=review)
+            if not dry_run and any(a['status'] == 'approved' and a['row_id'] in result.applied for a in learning.records('learning_labels', run_id)):
+                queue_learning(run_id, session.reviewer, background)
             return result.to_dict()
         except ValueError as e:
             dest.unlink(missing_ok=True)

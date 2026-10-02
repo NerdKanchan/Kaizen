@@ -1,6 +1,6 @@
 # Security and data-handling review (prototype)
 
-**Current web workflow:** The hosted collaboration release adds mandatory administrator approval, per-run access checks, secure cookies in hosted mode, same-origin mutations, and explicit self-approval. See [the current account and deployment guide](hosted-collaboration.md). The assessment below describes the earlier local two-reviewer workflow.
+**Current web workflow:** The hosted collaboration release adds mandatory administrator approval, per-run access checks, secure cookies in hosted mode, same-origin mutations, and explicit self-approval. See [the current account and deployment guide](hosted-collaboration.md) and [the October 2 repository review](code-review-2026-10-02.md). The assessment below describes the earlier local two-reviewer workflow.
 
 
 Scope: the code under `src/kaizen`, the local API, the workspace database and generated outputs. This is a

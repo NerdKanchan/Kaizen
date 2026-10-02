@@ -44,7 +44,7 @@ def sentence_transformer_embedder(model_name: str = "all-MiniLM-L6-v2") -> Embed
     must already be available locally — nothing is downloaded by the engine)."""
     from sentence_transformers import SentenceTransformer  # optional
 
-    model = SentenceTransformer(model_name)
+    model = SentenceTransformer(model_name, local_files_only=True)
 
     def embed(texts: Sequence[str]):
         return model.encode(list(texts), normalize_embeddings=True).tolist()

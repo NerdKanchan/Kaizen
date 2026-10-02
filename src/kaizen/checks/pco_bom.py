@@ -10,7 +10,7 @@ from kaizen.matching.ladder import MatchContext, MatchLadder
 from kaizen.matching.normalize import normalize
 from kaizen.models import CheckResult, CheckType, Classification, Discrepancy, DiscrepancyType, DocType, Document, DocumentItem, MatchLevel, Severity, Thresholds
 
-CHECK_VERSION = "1"
+CHECK_VERSION = "2"
 
 
 def _disc(dtype: DiscrepancyType, severity: Severity, detail: str) -> Discrepancy:
@@ -79,6 +79,10 @@ def run_pco_bom_check(pco: Document, boms: list[Document], ladder: MatchLadder, 
                 (active if it.is_active else inactive).setdefault(it.item_number, []).append(it)
             for chg in changes:
                 results.append(_evaluate(chg, code, bom, active, inactive, ladder, ids, number))
+    for result in results:
+        if any(item is not None and item.extraction_confidence < thresholds.low_confidence for item in (result.source_a, result.source_b)):
+            result.discrepancies.append(_disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.INFO, "Verify the extracted PCO/BOM values against the source page before clearing this change."))
+            result.requires_validation = True
     return results
 
 

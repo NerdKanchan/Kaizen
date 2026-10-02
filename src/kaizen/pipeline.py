@@ -139,14 +139,16 @@ def _infer_unreadable_label_refs(documents: list, audit: list[AuditEvent]) -> No
         audit.append(AuditEvent(action="document.identity_inferred", detail=f"{label.path}: label REF inferred as {inferred} from BOM parent {parent}"))
 
 
-def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds = Thresholds(), provider: AdjudicationProvider | None = None) -> Run:
+def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds = Thresholds(), provider: AdjudicationProvider | None = None, *, structured: bool = False, assembly_rules: list | None = None, learning_matchers: list | None = None, attribute_overrides: dict | None = None) -> Run:
     root, documents, inputs = ing.root, list(ing.documents), list(ing.inputs)
     warnings, audit = list(ing.warnings), list(ing.audit)
     provider = provider or get_provider()
     extra = [] if isinstance(provider, NullProvider) else [AiAdjudicationMatcher(provider)]
     groups = group_by_sku(documents)
     docs_by_id = {d.id: d for d in documents}
-    ladder = MatchLadder(store, thresholds, extra_matchers=extra)
+    ladder = MatchLadder(store, thresholds, extra_matchers=extra, structured=structured, attribute_overrides=attribute_overrides)
+    if learning_matchers:
+        ladder.matchers = [*learning_matchers, *ladder.matchers]
     results = []
     for g in groups:
         boms = [docs_by_id[i] for i in g.document_ids if docs_by_id[i].doc_type is DocType.BOM]
@@ -159,7 +161,7 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
             warnings.append(f"{g.sku}: BOM ↔ Label check skipped ({'no BOM' if not boms else 'no label'})")
         for bom in boms:
             for label in labels:
-                res = run_bom_label_check(bom, label, ladder, thresholds)
+                res = run_bom_label_check(bom, label, ladder, thresholds, assembly_rules)
                 results.extend(res)
                 audit.append(AuditEvent(action="check.completed", detail=f"BOM_LABEL {g.sku}: {len(res)} rows ({_rel(Path(bom.path), root)} vs {_rel(Path(label.path), root)})"))
             for drawing in drawings:
@@ -222,7 +224,15 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
     }
     extracted = [{"sha256": d.sha256, "type": d.doc_type.value, "sku": d.sku, "header": d.header, "items": [{"description": i.description, "item_number": i.item_number, "quantity": str(i.quantity), "uom": i.uom, "confidence": i.extraction_confidence, "attributes": i.attributes, "page": i.evidence.page, "bbox": i.evidence.bbox.model_dump() if i.evidence.bbox else None, "method": i.evidence.extraction_method, "raw": i.evidence.raw_text} for i in d.items]} for d in documents]
     extraction_signature = hashlib.sha256(json.dumps(extracted, sort_keys=True, default=str).encode()).hexdigest()
-    seed = json.dumps({"inputs": sorted((i.path, i.sha256) for i in inputs), "extraction": extraction_signature, "terminology": snap.version, "thresholds": thresholds.model_dump(), "tool": __version__, "parsers": parser_versions}, sort_keys=True)
+    matching_configuration = {}
+    if structured or assembly_rules or learning_matchers or attribute_overrides:
+        matching_configuration = {'structured_attributes': structured, 'assembly_rules': assembly_rules or [],
+                                  'attribute_overrides': [{'doc_type': k[0], 'description_key': k[1], 'attributes': v} for k, v in sorted((attribute_overrides or {}).items())],
+                                  'verified_rejected_pairs': sorted(pair for matcher in (learning_matchers or []) for pair in getattr(matcher, 'pairs', []))}
+    seed_data = {"inputs": sorted((i.path, i.sha256) for i in inputs), "extraction": extraction_signature, "terminology": snap.version, "thresholds": thresholds.model_dump(), "tool": __version__, "parsers": parser_versions}
+    if matching_configuration:
+        seed_data['matching_configuration'] = matching_configuration
+    seed = json.dumps(seed_data, sort_keys=True)
     run_id = "run-" + hashlib.sha256(seed.encode()).hexdigest()[:12]
     metadata = RunMetadata(
         run_id=run_id,
@@ -236,6 +246,7 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
         capabilities={**CAPABILITIES, "Offline OCR engines available": ", ".join(available_engines()) or "NONE — install Tesseract or kaizen-crosscheck[ocr]", "Optional AI adjudication (L5)": ("DISABLED (NullProvider; no external calls)" if isinstance(provider, NullProvider) else f"ENABLED ({provider.describe().get('provider')} / {provider.describe().get('model')}) — suggestions only, never authoritative")},
         ai_provider=provider.describe(),
         extraction_signature=extraction_signature,
+        matching_configuration=matching_configuration,
     )
     usage: dict[str, int] = {}
     for r in results:

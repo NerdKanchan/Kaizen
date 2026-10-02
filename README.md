@@ -4,6 +4,12 @@
 
 Kaizen now uses approved BD accounts, application administrators, and per-run ownership with View/Edit sharing. Users can make private copies, download independent workbooks and source files, and explicitly confirm self-approval. See [accounts, sharing and Render deployment](docs/hosted-collaboration.md). The web app no longer asks users to choose a facilitator or independent-reviewer slot; legacy CLI review commands remain available.
 
+For closed testing, open **Closed testing** on a run. Testers annotate true pairings, discrepancies,
+attributes, assemblies and released drawing applicability. Independent verification automatically rebuilds
+an offline candidate, with whole SKUs reserved for evaluation and separate training/evaluation exports.
+See [the tester workflow and learning safeguards](docs/closed-testing.md). Live runs retain their original
+recommendations; candidate learning does not fine-tune an external AI service.
+
 
 [![CI](https://github.com/Rahulreddy-23/Kaizen/actions/workflows/ci.yml/badge.svg)](https://github.com/Rahulreddy-23/Kaizen/actions/workflows/ci.yml)
 

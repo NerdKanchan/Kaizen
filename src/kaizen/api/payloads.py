@@ -8,8 +8,8 @@ class Payload(BaseModel):
 
 
 class Credentials(Payload):
-    email: str
-    password: str
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=1024)
 
 
 class RunPath(Payload):

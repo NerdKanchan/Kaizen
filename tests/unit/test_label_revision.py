@@ -1,8 +1,8 @@
 """Phase 5: Old ↔ New label as a semantic change report, expected changes derived from PCOs."""
 
-from kaizen.checks.label_revision import ExpectedChange, expected_changes_from_pcos, run_label_revision_check
+from kaizen.checks.label_revision import ExpectedChange, _Matcher, expected_changes_from_pcos, run_label_revision_check
 from kaizen.matching.ladder import MatchLadder
-from kaizen.models import CheckType, Classification, DiscrepancyType, Severity, Thresholds
+from kaizen.models import CheckType, Classification, DiscrepancyType, Relationship, Severity, Thresholds
 from kaizen.terminology.store import RelationshipStore
 from tests.unit.test_bom_label_check import label_doc
 from tests.unit.test_pco_bom_check import pco_doc
@@ -30,6 +30,47 @@ def test_unchanged_lines_are_exact_and_auto_cleared():
     lines = [r for r in results if r.role == "item"]
     assert len(lines) == 2 and all(r.classification is Classification.EXACT and not r.requires_validation for r in lines)
     assert "unchanged" in lines[0].explanation.lower()
+
+
+def test_low_confidence_unchanged_label_line_needs_review():
+    old = label_doc([("Mask", "1")])
+    new = label_doc([("Mask", "1")])
+    new.items[0].extraction_confidence = 0.4
+    row = next(r for r in run(old, new) if r.role == "item")
+    assert row.requires_validation
+    assert any(d.type is DiscrepancyType.LOW_EXTRACTION_CONFIDENCE for d in row.discrepancies)
+
+
+def test_ambiguous_unchanged_label_lines_need_review():
+    old = label_doc([("Mask", "1"), ("Mask", "1")])
+    new = label_doc([("Mask", "1"), ("Mask", "1")])
+    rows = [r for r in run(old, new) if r.role == "item"]
+    assert len(rows) == 2 and all(r.requires_validation for r in rows)
+    assert all(any(d.type is DiscrepancyType.AMBIGUOUS_MATCH for d in r.discrepancies) for r in rows)
+
+
+def test_inferred_label_identity_cannot_auto_clear_header():
+    old = label_doc([("Mask", "1")])
+    new = label_doc([("Mask", "1")])
+    new.header["ref_confidence"] = "inferred"
+    row = next(r for r in run(old, new) if r.role == "header")
+    assert row.requires_validation and row.classification is Classification.POTENTIAL
+
+
+def test_low_confidence_pco_cannot_auto_clear_expected_change():
+    old = label_doc([("Mask", "1")])
+    new = label_doc([("Mask", "2")])
+    source = old.items[0].model_copy(update={"extraction_confidence": 0.3})
+    expected = [ExpectedChange("QTY", "Mask", quantity="2", source="PCO1", source_item=source)]
+    row = next(r for r in run(old, new, expected) if r.role == "change")
+    assert row.requires_validation and row.classification is Classification.POTENTIAL
+
+
+def test_conflicting_attributes_cannot_satisfy_strict_pco_expectation():
+    store = RelationshipStore([Relationship(id="BAD", canonical="Needle 22G", aliases=["Needle 24G"])])
+    ladder = MatchLadder(store, TH, structured=True)
+    item = label_doc([("Needle 24G", "1")]).items[0]
+    assert not _Matcher(ladder, "1295108NS").strict("Needle 22G", item)
 
 
 def test_unexpected_addition_removal_and_quantity_change():

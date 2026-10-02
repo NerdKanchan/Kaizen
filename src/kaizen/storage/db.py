@@ -6,6 +6,40 @@ from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS learning_enrollments (
+    run_id TEXT PRIMARY KEY, enabled_by TEXT NOT NULL, enabled_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS learning_partitions (
+    sku_key TEXT PRIMARY KEY, split TEXT NOT NULL CHECK(split IN ('train','evaluation')),
+    assigned_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS learning_documents (
+    sha256 TEXT PRIMARY KEY, split TEXT NOT NULL CHECK(split IN ('train','evaluation'))
+);
+CREATE TABLE IF NOT EXISTS learning_labels (
+    run_id TEXT NOT NULL, row_id TEXT NOT NULL, version INTEGER NOT NULL,
+    payload TEXT NOT NULL, annotated_by TEXT NOT NULL, annotated_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', approved_by TEXT NOT NULL DEFAULT '',
+    approved_at TEXT NOT NULL DEFAULT '', approval_note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(run_id,row_id,version)
+);
+CREATE TABLE IF NOT EXISTS learning_drawings (
+    run_id TEXT NOT NULL, sku TEXT NOT NULL, version INTEGER NOT NULL,
+    payload TEXT NOT NULL, annotated_by TEXT NOT NULL, annotated_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', approved_by TEXT NOT NULL DEFAULT '',
+    approved_at TEXT NOT NULL DEFAULT '', approval_note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(run_id,sku,version)
+);
+CREATE TABLE IF NOT EXISTS learning_evaluations (
+    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL, payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS learning_jobs (
+    run_id TEXT PRIMARY KEY, generation INTEGER NOT NULL,
+    completed_generation INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL, requested_by TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS profiles (
     email TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
     is_admin INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL

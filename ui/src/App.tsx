@@ -11,6 +11,7 @@ import DocumentPage from "./pages/DocumentPage";
 import DocumentsPage from "./pages/DocumentsPage";
 import EvidencePage from "./pages/EvidencePage";
 import MiningPage from "./pages/MiningPage";
+import LearningPage from "./pages/LearningPage";
 import ReviewQueuePage from "./pages/ReviewQueuePage";
 import AdminPage from "./pages/AdminPage";
 import RunsPage from "./pages/RunsPage";
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="/runs/:runId/documents" element={<DocumentsPage />} />
             <Route path="/runs/:runId/documents/:docId" element={<DocumentPage />} />
             <Route path="/runs/:runId/mining" element={<MiningPage />} />
+            <Route path="/runs/:runId/learning" element={<LearningPage />} />
             <Route path="/runs/:runId/business" element={<BusinessCasePage />} />
             <Route path="/runs/:runId/diff" element={<DiffPage />} />
             <Route path="/terminology" element={<TerminologyPage />} />

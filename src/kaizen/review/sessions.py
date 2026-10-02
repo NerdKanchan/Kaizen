@@ -187,10 +187,10 @@ class UserStore:
     def create(self, email: str, password: str) -> User:
         if len(password or "") < MIN_PASSWORD:
             raise ValueError(f"the password must be at least {MIN_PASSWORD} characters")
-        if self.exists(email):
-            raise KeyError(email)
         now = _now()
-        with self.db.lock:
+        with self.db.transaction():
+            if self.exists(email):
+                raise KeyError(email)
             self.conn.execute(
                 "INSERT INTO users (email, password_hash, created_at, updated_at, failed_attempts, locked_until) VALUES (?,?,?,?,0,'')",
                 (email, hash_password(password), now, now),
@@ -210,23 +210,25 @@ class UserStore:
 
     def verify(self, email: str, password: str) -> bool:
         """True for the right password on an unlocked account. Wrong guesses count towards a lockout."""
-        row = self._row(email)
-        if row is None or self.locked_seconds(email) > 0:
+        # Checking the password and advancing the lockout counter are one operation.
+        with self.db.transaction():
+            row = self._row(email)
+            if row is None or self.locked_seconds(email) > 0:
+                return False
+            if verify_password(password or "", row["password_hash"]):
+                if row["failed_attempts"] or row["locked_until"]:
+                    with self.db.lock:
+                        self.conn.execute("UPDATE users SET failed_attempts = 0, locked_until = '' WHERE email = ?", (email,))
+                        self.conn.commit()
+                return True
+            failed = int(row["failed_attempts"]) + 1
+            locked = (datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_SECONDS)).isoformat(timespec="seconds") if failed >= MAX_FAILED else ""
+            with self.db.lock:
+                self.conn.execute("UPDATE users SET failed_attempts = ?, locked_until = ? WHERE email = ?", (failed, locked, email))
+                if locked:
+                    self.db.audit(email, "auth.locked", f"{failed} failed sign-ins; locked for {LOCKOUT_SECONDS // 60} minutes")
+                self.conn.commit()
             return False
-        if verify_password(password or "", row["password_hash"]):
-            if row["failed_attempts"] or row["locked_until"]:
-                with self.db.lock:
-                    self.conn.execute("UPDATE users SET failed_attempts = 0, locked_until = '' WHERE email = ?", (email,))
-                    self.conn.commit()
-            return True
-        failed = int(row["failed_attempts"]) + 1
-        locked = (datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_SECONDS)).isoformat(timespec="seconds") if failed >= MAX_FAILED else ""
-        with self.db.lock:
-            self.conn.execute("UPDATE users SET failed_attempts = ?, locked_until = ? WHERE email = ?", (failed, locked, email))
-            if locked:
-                self.db.audit(email, "auth.locked", f"{failed} failed sign-ins; locked for {LOCKOUT_SECONDS // 60} minutes")
-            self.conn.commit()
-        return False
 
     def delete(self, email: str, by: str = "admin") -> bool:
         """Clear the account so the address can sign up again. Decisions keep their reviewer name: they

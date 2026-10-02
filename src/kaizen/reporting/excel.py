@@ -13,6 +13,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from kaizen.checks.bom_label import is_comparable_bom_item
 from kaizen.models import Classification, DocType, DocumentItem, Run
 from kaizen.reporting.styles import BORDER, CLASS_FILLS, HEADER_FILL, HEADER_FONT, SECTION_FONT, SEVERITY_FILLS, TITLE_FONT, WRAP
+from kaizen.reporting.workbook import save_workbook
 
 
 @dataclass
@@ -71,9 +72,12 @@ def export_with_review(workspace, run: Run, path: Path | str, metrics: dict[str,
     decisions = review.all_decisions(rid)
     finals = review.finals(rid)
     states = {r.row_id: review.state_of(decisions.get(r.row_id, {}), finals.get(r.row_id)) for r in run.results}
+    from kaizen.review.learning import LearningStore
     from kaizen.review.mining import terminology_worklist
 
-    bundle = ReviewBundle(decisions=decisions, finals=finals, states=states, action_items=ActionItemStore(workspace.db).for_run(rid), business=business_case(run, timing=review.timing(rid)), worklist=terminology_worklist(run, review, workspace.repository).to_dict())
+    learning = LearningStore(workspace.db)
+    training = run.model_copy(update={"results": [r for r in run.results if learning.split(r.sku) != "evaluation"]})
+    bundle = ReviewBundle(decisions=decisions, finals=finals, states=states, action_items=ActionItemStore(workspace.db).for_run(rid), business=business_case(run, timing=review.timing(rid)), worklist=terminology_worklist(training, review, workspace.repository).to_dict())
     result = write_report(run, path, metrics=metrics, review=bundle)
     if collaborative:
         wb = load_workbook(result)
@@ -93,7 +97,7 @@ def export_with_review(workspace, run: Run, path: Path | str, metrics: dict[str,
         history.auto_filter.ref = history.dimensions
         for col in history.columns:
             history.column_dimensions[col[0].column_letter].width = 28
-        wb.save(result)
+        save_workbook(wb, result)
     return result
 
 BOM_LABEL_COLUMNS = [
@@ -173,7 +177,7 @@ def write_report(run: Run, path: Path | str, metrics: dict[str, Any] | None = No
     _audit_sheet(wb.create_sheet("Audit_Log"), run)
     if metrics:
         _accuracy_sheet(wb.create_sheet("Accuracy"), metrics)
-    wb.save(path)
+    save_workbook(wb, path)
     return path
 
 

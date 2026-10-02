@@ -33,6 +33,7 @@ import type {
   VerifyOutcome,
   ViewerParams,
 } from "./types";
+import type { Annotation, DrawingBody, GroundTruthBody, LearningReport, LearningRow, LearningSummary } from "./learning";
 import { supportedRunFiles, uploadProblem } from "./lib/uploads";
 import { notifyDataChanged } from "./lib/dataRefresh";
 
@@ -133,6 +134,18 @@ export interface RelationshipUpdateBody {
 }
 
 export const api = {
+  learning: {
+    summary: (runId: string) => request<LearningSummary>(`/api/runs/${enc(runId)}/learning`),
+    enable: (runId: string) => request<LearningSummary>(`/api/runs/${enc(runId)}/learning/enable`, {method: "POST"}),
+    row: (runId: string, rowId: string) => request<LearningRow>(`/api/runs/${enc(runId)}/learning/rows/${enc(rowId)}`),
+    annotate: (runId: string, rowId: string, body: GroundTruthBody) => request<Annotation>(`/api/runs/${enc(runId)}/learning/rows/${enc(rowId)}`, json("PUT", body)),
+    approve: (runId: string, rowId: string, version: number, approve: boolean) => request<Annotation>(`/api/runs/${enc(runId)}/learning/rows/${enc(rowId)}/approve`, json("POST", {expected_version: version, approve})),
+    drawing: (runId: string, sku: string, body: DrawingBody) => request<unknown>(`/api/runs/${enc(runId)}/learning/drawings/${enc(sku)}`, json("PUT", body)),
+    approveDrawing: (runId: string, sku: string, version: number, approve: boolean) => request<unknown>(`/api/runs/${enc(runId)}/learning/drawings/${enc(sku)}/approve`, json("POST", {expected_version: version, approve})),
+    shadow: (runId: string) => request<LearningReport>(`/api/runs/${enc(runId)}/learning/shadow`, {method: "POST"}),
+    exportUrl: (runId: string, split: "train" | "evaluation") => `/api/runs/${enc(runId)}/learning/export.json?split=${split}`,
+    observationsUrl: (runId: string) => `/api/runs/${enc(runId)}/learning/observations.json`,
+  },
   health: () => request<Health>("/api/health"),
 
   profiles: () => request<{email: string}[]>("/api/profiles"),

@@ -17,7 +17,7 @@ from kaizen.matching.ladder import MatchContext, MatchLadder
 from kaizen.matching.normalize import normalize
 from kaizen.models import CheckResult, CheckType, Classification, DiscrepancyType, DocType, Document, DocumentItem, ItemCategory, MatchLevel, Severity, Thresholds
 
-CHECK_VERSION = "1"
+CHECK_VERSION = "2"
 
 
 @dataclass
@@ -96,7 +96,7 @@ class _Matcher:
             return False
         out = self.ladder.match(description, item.description, MatchContext(sku=self.sku, doc_types=(DocType.PCO, DocType.LABEL)))
         if strict:
-            return out.level in (MatchLevel.EXACT, MatchLevel.RELATIONSHIP)
+            return out.assignable and not out.needs_confirmation and out.level in (MatchLevel.EXACT, MatchLevel.RELATIONSHIP)
         return out.assignable
 
 
@@ -105,7 +105,7 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
     sku = sku or new.sku or old.sku or "UNKNOWN"
     ids = RowIdFactory(sku, "V", pair_token(old.id, new.id))
     fit = _Matcher(ladder, sku)
-    results: list[CheckResult] = [_header_row(old, new, sku, ids)]
+    results: list[CheckResult] = [_header_row(old, new, sku, ids, thresholds)]
     for doc in (old, new):
         if not doc.items or doc.header.get('unreadable_pages'):
             detail = f"Label revision extraction incomplete ({doc.path}); changes cannot be confirmed against the source. " + "; ".join(doc.warnings)
@@ -119,12 +119,17 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
     pair_by_a = {p.a_index: p for p in asg.pairs}
 
     def mk(role, a, b, cls, explanation, discrepancies=(), level=MatchLevel.NONE, score=0.0):
-        return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.LABEL_REVISION, role=role, source_a=a, source_b=b, normalized_a=normalize(a.description).normalized if a else None, normalized_b=normalize(b.description).normalized if b else None, classification=cls, match_level=level, score=score, explanation=explanation, discrepancies=list(discrepancies), requires_validation=cls is not Classification.EXACT or bool(discrepancies))
+        discrepancies = list(discrepancies)
+        if any(item is not None and item.extraction_confidence < thresholds.low_confidence for item in (a, b)):
+            discrepancies.append(disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.INFO, "Verify the extracted label/PCO values against the source page before clearing this change."))
+        return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.LABEL_REVISION, role=role, source_a=a, source_b=b, normalized_a=normalize(a.description).normalized if a else None, normalized_b=normalize(b.description).normalized if b else None, classification=cls, match_level=level, score=score, explanation=explanation, discrepancies=discrepancies, requires_validation=cls is not Classification.EXACT or bool(discrepancies))
 
     def unexpected(detail: str):
         return disc(DiscrepancyType.UNEXPECTED_LABEL_CHANGE, Severity.MAJOR, detail)
 
     def confirm_note(e, strict_ok: bool) -> tuple[Classification, str]:
+        if e.source_item is not None and e.source_item.extraction_confidence < thresholds.low_confidence:
+            return Classification.POTENTIAL, f"probably per {e.source} (PCO extraction confidence is low — reviewer to confirm)"
         return (Classification.EXACT, f"per {e.source}") if strict_ok else (Classification.POTENTIAL, f"probably per {e.source} (wording only resembles the PCO description — reviewer to confirm)")
 
     for i, o in enumerate(old_items):
@@ -143,16 +148,20 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
                 results.append(mk("change", o, None, Classification.MISMATCH, detail, [unexpected(detail)]))
             continue
         n = new_items[p.b_index]
+        pairing_discrepancies = []
+        if asg.ambiguous_a.get(i):
+            pairing_discrepancies.append(disc(DiscrepancyType.AMBIGUOUS_MATCH, Severity.MAJOR, "Multiple new-label lines fit this old-label line; confirm the correct pairing."))
+        pairing_uncertain = p.outcome.needs_confirmation or bool(pairing_discrepancies)
         desc_same = p.outcome.level is MatchLevel.EXACT
         qty_same = o.quantity is not None and o.quantity == n.quantity
         sub_same = o.sub_quantity == n.sub_quantity
         uom_same = (o.uom or "EACH").upper() == (n.uom or "EACH").upper()
         if desc_same and qty_same and sub_same and uom_same:
-            results.append(mk("item", o, n, Classification.EXACT, f"UNCHANGED: '{n.description}' qty {_q(n.quantity)} on both revisions", level=MatchLevel.EXACT, score=1.0))
+            results.append(mk("item", o, n, Classification.POTENTIAL if pairing_uncertain else Classification.EXACT, f"UNCHANGED: '{n.description}' qty {_q(n.quantity)} on both revisions", pairing_discrepancies, level=p.outcome.level, score=p.outcome.score))
             continue
         parts: list[str] = []
-        discrepancies = []
-        cls = Classification.EXACT
+        discrepancies = pairing_discrepancies
+        cls = Classification.POTENTIAL if pairing_uncertain else Classification.EXACT
         substitution = None
         if not desc_same:
             exp = next((e for e in expected if not e.consumed and e.kind == "SUBSTITUTE" and fit.fits(e.description, n) and (not e.old_description or fit.fits(e.old_description, o))), None)
@@ -226,7 +235,7 @@ def run_label_revision_check(old: Document, new: Document, expected: list[Expect
     return results
 
 
-def _header_row(old: Document, new: Document, sku: str, ids: RowIdFactory) -> CheckResult:
+def _header_row(old: Document, new: Document, sku: str, ids: RowIdFactory, thresholds: Thresholds) -> CheckResult:
     a, b = header_item(old, "old label"), header_item(new, "new label")
     if not old.sku or not new.sku:
         detail = "One or both label REF identities could not be extracted; verify the source labels."
@@ -239,4 +248,7 @@ def _header_row(old: Document, new: Document, sku: str, ids: RowIdFactory) -> Ch
     if problems:
         detail = "; ".join(problems) + "; no PCO change explains a header change"
         return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.LABEL_REVISION, role="header", source_a=a, source_b=b, normalized_a=old.sku, normalized_b=new.sku, classification=Classification.MISMATCH, match_level=MatchLevel.NONE, score=0.0, explanation=f"HEADER CHANGED: {detail}", discrepancies=[disc(DiscrepancyType.UNEXPECTED_LABEL_CHANGE, Severity.MAJOR, detail)], requires_validation=True)
+    if min(a.extraction_confidence, b.extraction_confidence) < thresholds.low_confidence or any(doc.header.get("ref_confidence") == "inferred" for doc in (old, new)):
+        detail = "Label REF identity has low extraction confidence or was inferred; verify both source labels."
+        return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.LABEL_REVISION, role="header", source_a=a, source_b=b, normalized_a=old.sku, normalized_b=new.sku, classification=Classification.POTENTIAL, match_level=MatchLevel.EXACT, score=1.0, explanation=f"HEADER UNCHANGED: {detail}", discrepancies=[disc(DiscrepancyType.LOW_EXTRACTION_CONFIDENCE, Severity.INFO, detail)], requires_validation=True)
     return CheckResult(row_id=ids.next(), sku=sku, check=CheckType.LABEL_REVISION, role="header", source_a=a, source_b=b, normalized_a=old.sku, normalized_b=new.sku, classification=Classification.EXACT, match_level=MatchLevel.EXACT, score=1.0, explanation=f"HEADER UNCHANGED: REF {new.sku} and product name identical on both revisions")

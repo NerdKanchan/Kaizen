@@ -31,6 +31,10 @@ their original terminology snapshots.
 New rules record the source filename, SHA-256 hash, worksheet, row and importing reviewer. Updates record
 the import source and hash in version history. Shared terminology imports require an application administrator.
 
+Kaizen's XLSX exports store business text as literal cells. CSV exports prefix values that a spreadsheet
+could execute as formulas (`=`, `+`, `-`, `@`, including leading whitespace) with an apostrophe. Use XLSX
+for exact text preservation when exchanging such values; CSV re-import retains the safety prefix.
+
 ## Use the CLI
 
 Inspect the actual sheet and column names first:

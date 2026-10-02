@@ -60,6 +60,7 @@ class RunMetadata(BaseModel):
     )
     ai_provider: dict[str, Any] = Field(default_factory=dict, description="Which AI provider (if any) was active; NullProvider by default")
     extraction_signature: str = Field(default="", description="SHA-256 of extracted identities/items/evidence; different OCR output produces a distinct run")
+    matching_configuration: dict[str, Any] = Field(default_factory=dict, description="Optional local candidate settings and verified rule provenance")
 
 
 class CoverageFinding(BaseModel):

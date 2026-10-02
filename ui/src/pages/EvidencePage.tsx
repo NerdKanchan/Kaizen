@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api } from "../api";
 import { ClassificationBadge, RoleTag, SeverityBadge } from "../components/Badges";
 import { DecisionPanel } from "../components/DecisionPanel";
+import { GroundTruthPanel } from "../components/GroundTruthPanel";
 import { EvidenceCard } from "../components/EvidenceCard";
 import { ErrorBox, Loading } from "../components/Feedback";
 import { HotkeyHelp, HotkeyHint } from "../components/HotkeyHelp";
@@ -209,6 +210,7 @@ export default function EvidencePage() {
         {/* ---- decide, and what follows from it */}
         <aside id="review-decision" className="review-tools space-y-5">
           <DecisionPanel runId={runId} rowId={rowId} detail={d} onChanged={detail.reload} />
+          {res.role === "item" && ["BOM_LABEL", "BOM_DRAWING", "LABEL_DRAWING"].includes(res.check) && <GroundTruthPanel runId={runId} rowId={rowId} detail={d} />}
           <div className="space-y-5">
             {d.permission !== "view" && session?.is_admin && <SaveRelationshipPanel runId={runId} detail={d} onCreated={detail.reload} />}
             {d.permission !== "view" && <ActionItemPanel runId={runId} detail={d} onCreated={detail.reload} />}

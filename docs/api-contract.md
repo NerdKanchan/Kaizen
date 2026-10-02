@@ -128,6 +128,36 @@ Unconfirmed fuzzy pairings ranked by the rows they would auto-clear once approve
 ## Review effort (measured)
 Opening a row (`GET .../results/{row_id}`) with a session records the time for that reviewer's slot; the next decision on that row by the same slot stores `seconds_spent` (only when the gap is between 5 seconds and 15 minutes; bulk accept and Excel imports are never timed). `GET .../business-case` uses the median of timed decisions once there are at least 10 (`effort_basis: "measured"`, `timed_decisions`, `measured_minutes_per_validation_row`, `minutes_per_validation_row_used`); below that it keeps the brief's assumption and says so.
 
+## Closed testing
+
+All paths below start with `/api/runs/{run_id}/learning`. Existing run permissions apply;
+enrollment requires the owner, writes require Edit access, and verification, exports and candidate
+evaluation require an application administrator with Edit access. Ground-truth verification requires
+a different actor from the annotation author. See [the tester guide](closed-testing.md).
+
+| Method | Suffix | Body / params | Returns |
+|---|---|---|---|
+| GET | (none) | | Enrollment, immutable SKU splits, annotation/drawing coverage, balanced tasks, latest evaluation and automatic job state. |
+| POST | `/enable` | | Enroll the run and reserve evaluation SKU identities before learning. |
+| GET | `/rows/{row_id}` | | Current annotation, split, source options, suggested attributes and review revision. |
+| PUT | `/rows/{row_id}` | `{expected_version, review_revision, verdict, classification, expected_a_ids[], expected_b_ids[], discrepancies[], attributes, assembly_quantities, note}` | Versioned pending annotation. |
+| POST | `/rows/{row_id}/approve` | `{expected_version, approve, note?}` | Verified or rejected annotation; queues an offline candidate rebuild. |
+| PUT | `/drawings/{sku}` | `{expected_version, doc_id, applicability, released_revision, release_reference, note}` | Versioned pending applicability record. |
+| POST | `/drawings/{sku}/approve` | `{expected_version, approve, note?}` | Verified or rejected applicability; queues a rebuild. |
+| GET | `/export.json` | `split=train\|evaluation` | Separate verified dataset with source evidence and configuration metadata. |
+| GET | `/observations.json` | | Normal review histories and timing, explicitly labelled as raw observations. |
+| POST | `/shadow` | | Rebuild and score a local candidate; returns the frozen evaluation report. |
+
+Verdicts are `CORRECT_PAIR`, `INCORRECT_PAIR`, `GENUINE_DISCREPANCY` or `UNRESOLVED`.
+Attributes are keyed by selected source item ID and support `component_type`, `dimensions_mm[]`,
+`gauge`, `concentration_pct` and `pack_quantity`. Assembly quantities map BOM item IDs to positive
+quantities per label unit. Applicability is `CONFIRMED_RELEASED`, `NOT_APPLICABLE` or `UNCONFIRMED`;
+confirmed release requires a revision and release reference. Stale annotation/review versions return 409.
+Unresolved, stale and unverified labels are excluded from datasets. Drawing examples require verified
+released applicability. Candidate evaluation uses saved parsed sources and never changes live results
+or shared terminology. The durable background job resumes after restart; failed jobs can be retried.
+Evaluation SKUs are excluded from relationship mining and relationship creation from a row.
+
 ## Certificate, run diff, optional Excel round-trip
 | Method | Path | Body / params | Returns |
 |---|---|---|---|
