@@ -19,7 +19,7 @@ from kaizen.ingest.pdf_words import Word, extract_words, group_lines, line_bbox,
 from kaizen.models import DocType, Document, DocumentItem, Evidence, ItemCategory
 
 PARSER_NAME = "drawing_pdf"
-PARSER_VERSION = "3"
+PARSER_VERSION = "4"
 
 ES_MARKERS = set(
     """CON DE DEL LA EL LOS LAS PARA SEGUN SI O Y EN UN UNA TUBO AGUJA JERINGA JERINGAS TIJERAS ALAMBRE GUIA CINTA METRICA
@@ -49,6 +49,7 @@ _COND_EN = re.compile(r"\(\s*(?:IF|WHEN) APPLICABLE(?:\s+(?:AS\s+)?PER BOM)?\s*\
 _PLACEMENT_RE = re.compile(r"\(\s*(PLACE IN [^)]*)\)", re.IGNORECASE)
 _PLACED_ON_TRAY_RE = re.compile(r"\s+(PLACED\s+ON\s+(?:THE\s+)?TRAY)\s*$", re.IGNORECASE)
 _PLACED_ON_TRAY_ES_RE = re.compile(r"\bCOLOCAD[AO]\b.*\bBANDEJA\b", re.IGNORECASE)
+_LEBELING_TYPO_RE = re.compile(r"\bLEBELING\b", re.IGNORECASE)
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _DRAWING_NO_RE = re.compile(r"DRAWING NO\.?\s*([A-Z0-9][A-Z0-9\-]{4,})", re.IGNORECASE)
 _DWG_RE = re.compile(r"\b(DWG[0-9]{5,})\b")
@@ -224,6 +225,8 @@ def parse_drawing_pdf(path: Path | str) -> Document:
             if not en_text or not re.search(r"[A-Z]{2,}", en_text):
                 continue
             es_text = " ".join(_PAREN_RE.sub("", " ".join(es)).split())
+            if page_method == "ocr" and re.search(r"\bETIQUETADO\b", es_text, re.IGNORECASE):
+                en_text = _LEBELING_TYPO_RE.sub("LABELING", en_text)
             depicted_count = None
             if m := re.search(r"\s*\((\d+)\)$", en_text):
                 depicted_count = m.group(1)
@@ -290,7 +293,7 @@ def _split_notes(lines: list[list[Word]], page) -> tuple[list[list[Word]], list[
 
 
 def _is_instruction(text: str) -> bool:
-    return bool(re.match(r"^(?:PLACE|STEP|WRAP|FOR CORRECT|CORRECT PLACEMENT|FIRST FOLD|SECOND FOLD|TOP SIDE|LOWER SIDE|TRAY WRAPPED|WRAPPED GOWN|THREE KITS|ALL LITERATURE|GLOVE WALLET ITEMS|GOWN CSR WRAP|BAGGED DRESSING|DRESSING COMPONENTS|BAG WITH DRESSING|PICC OR POWERHOHN)", text, re.I))
+    return text.upper().startswith("ELECTRONIC LABELING NOTICE INSERT") or bool(re.match(r"^(?:PLACE|STEP|WRAP|FOR CORRECT|CORRECT PLACEMENT|FIRST FOLD|SECOND FOLD|TOP SIDE|LOWER SIDE|TRAY WRAPPED|WRAPPED GOWN|THREE KITS|ALL LITERATURE|GLOVE WALLET ITEMS|GOWN CSR WRAP|BAGGED DRESSING|DRESSING COMPONENTS|BAG WITH DRESSING|PICC OR POWERHOHN)", text, re.I))
 
 
 def _spatial_header(page, lines, header, method, warnings):
