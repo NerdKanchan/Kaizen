@@ -12,13 +12,13 @@ from pathlib import Path
 import pymupdf
 
 from kaizen.ingest.hashing import document_id, sha256_file
-from kaizen.ingest.ocr import correct_ocr_text, ocr_available, ocr_min_confidence, ocr_page, ocr_words
+from kaizen.ingest.ocr import correct_fused_label_words, correct_ocr_text, ocr_available, ocr_page, ocr_words
 from kaizen.ingest.pdf_words import Word, extract_words, group_lines, line_bbox, line_text
 from kaizen.ingest.quantity import parse_label_line
 from kaizen.models import BBox, DocType, Document, DocumentItem, Evidence, ItemCategory
 
 PARSER_NAME = "label_pdf"
-PARSER_VERSION = "2"
+PARSER_VERSION = "3"
 
 _REF_CODE_RE = re.compile(r"^[A-Z0-9]{5,12}$")
 _NUMBER_RE = re.compile(r"^\d+(?:\.\d+)?$")
@@ -139,7 +139,7 @@ def parse_label_pdf(path: Path | str) -> Document:
                     if recognised:
                         words, page_method = recognised, "ocr"
                         header["ocr_engine"] = result.engine
-                        warnings.append(f"page {page_no}: {'unreadable native REF' if native else 'no native text'}; OCR ({result.engine}, {result.dpi} dpi) produced {len(words)} words, min confidence {ocr_min_confidence(result):.2f} — verify against the page image")
+                        warnings.append(f"page {page_no}: {'unreadable native REF' if native else 'no native text'}; OCR ({result.engine}, {result.dpi} dpi) produced {len(words)} words; REF and contents confidence are recorded separately — verify extracted fields against the page image")
                     elif native:
                         warnings.append(f"page {page_no}: OCR re-read of the page image found no text; native text kept")
             elif native:
@@ -179,6 +179,8 @@ def parse_label_pdf(path: Path | str) -> Document:
                 raw_text = " ".join(w.source_text if w.source_text is not None else w.text for w in entry_words).strip()
                 structural_text = " ".join(w.text for w in entry_words)
                 text = correct_ocr_text(structural_text) if page_method == "ocr" else structural_text
+                if page_method == "ocr":
+                    text = correct_fused_label_words(text)
                 parsed = parse_label_line(text)
                 if not parsed.matched:
                     warnings.append(f"page {page_no}: unparsed text in contents region skipped: '{raw_text[:60]}'")

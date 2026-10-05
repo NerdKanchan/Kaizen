@@ -52,6 +52,48 @@ _STRUCTURAL_CORRECTIONS: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"(?<=X)(?=\d)", re.IGNORECASE), " "),
 )
 
+_LABEL_WORDS = frozenset(
+    """
+    ABSORBENT ADHESIVE ALCOHOL AMPULE APPLICATOR ASSEMBLY ASPIRATION BAND BARRIER BENDABLE BLUE
+    BOUFFANT CAP CATHETER CHLORAPREP CONTROL DEVICE DILATOR DRAPE DRESSING DUAL EACH ECG ELECTRODE
+    ELECTRODES END FENESTRATED FLEXURA FUNNEL GAUZE GLOVE GLOVES GUIDE GUIDEWIRE HOLDER HYPODERMIC
+    ID INTRODUCER ISOPROPYL IV LEAD LEADS LENGTH LID LUMEN MASK MEASURE MEASURING MICROINTRODUCER
+    NEEDLE NITINOL OD PERIPHERAL PICC PROTECTIVE SAFETY SALINE SCALPEL SHERLOCK SOLUTION STRAIGHT
+    STYLET SURGICAL SYRINGE TAPE TIP TOURNIQUET TRIMMING VESSEL WITH
+    """.split()
+)
+_FUSED_LABEL_TOKEN_RE = re.compile(r"\b[A-Za-z]{8,}\b")
+
+
+def _split_fused_label_token(token: str) -> str:
+    upper = token.upper()
+    if upper in _LABEL_WORDS:
+        return token
+
+    @lru_cache(maxsize=None)
+    def segment(start: int) -> tuple[tuple[str, ...], ...]:
+        if start == len(token):
+            return ((),)
+        paths = []
+        for end in range(start + 2, len(token) + 1):
+            if upper[start:end] not in _LABEL_WORDS:
+                continue
+            for suffix in segment(end):
+                paths.append((token[start:end], *suffix))
+                if len(paths) > 1:
+                    return tuple(paths[:2])
+        return tuple(paths)
+
+    candidates = segment(0)
+    if len(candidates) == 1 and len(candidates[0]) > 1:
+        return " ".join(candidates[0])
+    return token
+
+
+def correct_fused_label_words(text: str) -> str:
+    """Split only uniquely segmented OCR tokens made entirely of known label terms."""
+    return _FUSED_LABEL_TOKEN_RE.sub(lambda match: _split_fused_label_token(match.group()), text)
+
 
 def correct_ocr_text(text: str) -> str:
     for pattern, replacement in _PRODUCT_CORRECTIONS:

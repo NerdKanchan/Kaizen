@@ -205,7 +205,7 @@ def run_checks(ing: Ingested, store: RelationshipStore, thresholds: Thresholds =
         audit.append(AuditEvent(action="check.completed", detail=f"PCO_BOM {number}: {len(res)} rows against {len(boms)} BOM(s)"))
     snap = store.snapshot()
     parser_versions = {
-        "ocr": "2",
+        "ocr": "3",
         "pdf_geometry": "2",
         "grouping": "2",
         "bom_pdf": bom_pdf.PARSER_VERSION,
